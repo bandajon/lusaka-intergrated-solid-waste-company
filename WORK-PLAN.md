@@ -1,4 +1,4 @@
-# **Implementation Plan and Gantt Chart for the Lusaka Integrated Solid Waste Management Platform**
+# **Implementation Plan for the Lusaka Integrated Solid Waste Management Platform**
 
 ---
 
