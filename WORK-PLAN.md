@@ -491,13 +491,13 @@ This revised implementation plan extends the schedule to the end of **March 2025
 
 ## **Resource Allocation**
 
-- **Backend Developers:** 10 developers (one per service)
+- **Backend Developers:** 2 developers
 - **Frontend Developers:** 2 developers
 - **Mobile Developer:** 1 developer
 - **UI/UX Designer:** 1 designer
 - **QA Engineers:** 5 engineers (rotating across services)
 - **DevOps Engineer:** 1 engineer
-- **Integration Specialists:** 2 specialists (for payment, mapping, and weather integrations)
+- **Integration Specialists:** 1 specialists (for payment, mapping, and weather integrations)
 - **GIS Specialist:** 1 specialist
 - **Data Scientist/AI Engineer:** 1 engineer
 - **Data Analyst:** 1 analyst
