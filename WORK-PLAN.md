@@ -397,10 +397,10 @@ This implementation plan enhances the previous schedule by incorporating the new
 
 ## **Resource Allocation**
 
-- **Backend Developers:** 10 developers (one per service)
-- **QA Engineers:** 4 engineers (rotating across services)
+- **Backend Developers:** 3 developers
+- **QA Engineers:** 1 engineers (rotating across services)
 - **DevOps Engineer:** 1 engineer
-- **Integration Specialists:** 2 specialists (for payment, mapping, and weather integrations)
+- **Integration Specialists:** 1 specialists (for payment, mapping, and weather integrations)
 - **GIS Specialist:** 1 specialist (for Google Earth Engine integration)
 - **Data Scientist/AI Engineer:** 1 engineer
 - **Data Analyst:** 1 analyst (for reporting service)
