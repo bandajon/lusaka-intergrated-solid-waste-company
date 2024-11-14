@@ -27,19 +27,19 @@
 
 ## **Introduction**
 
-The Lusaka Integrated Solid Waste Management Company (LISWMC) seeks to modernize waste management in Lusaka by implementing a robust, scalable, and efficient backend architecture. This architecture supports various stakeholders, including LISWMC staff, franchise collectors, and citizens, providing functionalities such as payment management, real-time tracking, fleet management, and advanced zone classification using Google Earth Engine APIs.
+The Lusaka Integrated Solid Waste Management Company (LISWMC) aims to modernize waste management in Lusaka by implementing a robust, scalable, and efficient backend architecture. This architecture supports various stakeholders, including LISWMC staff, franchise collectors, landfill operators, and citizens. It provides functionalities such as payment management, real-time tracking, fleet management, landfill operations, and advanced zone classification using Google Earth Engine APIs.
 
-This document outlines a detailed backend architecture based on the system design provided, incorporating **gRPC** for inter-service communication and implementing a **Backend For Frontend (BFF)** pattern. The architecture is designed to be highly modular, scalable, and maintainable, ensuring that it meets both current and future needs of the platform.
+This document outlines a detailed backend architecture incorporating **gRPC** for inter-service communication and implementing a **Backend For Frontend (BFF)** pattern. The architecture is designed to be highly modular, scalable, and maintainable, ensuring that it meets both current and future needs of the platform, including the new landfill operations.
 
 ---
 
 ## **Architecture Overview**
 
-The backend architecture is composed of several microservices, each responsible for a specific domain within the system. The microservices communicate with each other using gRPC, a high-performance, open-source universal RPC framework. The **BFF Service** acts as the gateway between client applications and the backend microservices, exposing RESTful APIs to the clients and translating these into gRPC calls to the microservices.
+The backend architecture consists of several microservices, each responsible for a specific domain within the system. The microservices communicate with each other using gRPC, a high-performance, open-source universal RPC framework. The **BFF Service** acts as the gateway between client applications and the backend microservices, exposing RESTful APIs to the clients and translating these into gRPC calls to the microservices.
 
 **Key Components:**
 
-- **Clients:** Mobile applications (Android/iOS), web applications, USSD services.
+- **Clients:** Mobile applications (Android/iOS), web applications, USSD services, landfill gate systems.
 - **BFF Service:** Acts as a mediator between clients and microservices.
 - **Microservices:** Independently deployable services responsible for specific functionalities.
 - **Database Layer:** PostgreSQL database accessed by microservices.
@@ -55,7 +55,7 @@ The backend architecture is composed of several microservices, each responsible 
 
 **Purpose:**
 
-- Serves as the single entry point for all client applications.
+- Serves as the single entry point for all client applications, including landfill gate systems.
 - Exposes RESTful APIs tailored to the needs of different clients.
 - Coordinates with backend microservices via gRPC.
 - Simplifies client interactions by aggregating data from multiple services.
@@ -70,7 +70,7 @@ The backend architecture is composed of several microservices, each responsible 
 
 **Features:**
 
-- **Client-Specific APIs:** Offers APIs optimized for mobile apps, web applications, and USSD services.
+- **Client-Specific APIs:** Offers APIs optimized for mobile apps, web applications, USSD services, and landfill gate systems.
 - **Caching Mechanisms:** Implements caching strategies to improve response times for frequently accessed data.
 - **Throttling and Rate Limiting:** Controls the rate of incoming requests to prevent abuse and ensure stability.
 
@@ -106,6 +106,7 @@ Each microservice is a self-contained unit responsible for a specific business d
 
 - Processes payments via mobile money platforms (MTN, Airtel, Zamtel).
 - Manages payment records, invoices, and transaction statuses.
+- Handles both household service payments and landfill dumping fees.
 - Sends payment reminders and confirmations.
 
 **gRPC Methods:**
@@ -114,6 +115,7 @@ Each microservice is a self-contained unit responsible for a specific business d
 - `VerifyPayment(PaymentIDRequest) returns (PaymentStatusResponse)`
 - `HandlePaymentNotification(PaymentNotification) returns (EmptyResponse)`
 - `ListUserPayments(UserIDRequest) returns (ListPaymentsResponse)`
+- `ProcessLandfillPayment(LandfillPaymentRequest) returns (PaymentResponse)`
 
 **Integration:**
 
@@ -148,6 +150,7 @@ Each microservice is a self-contained unit responsible for a specific business d
 - Tracks real-time location of vehicles.
 - Schedules regular and emergency collections.
 - Assigns drivers and vehicles to routes.
+- Manages landfill vehicle entries and exits.
 
 **gRPC Methods:**
 
@@ -156,18 +159,45 @@ Each microservice is a self-contained unit responsible for a specific business d
 - `GetVehicleLocation(VehicleIDRequest) returns (LocationResponse)`
 - `AssignRouteToVehicle(RouteAssignmentRequest) returns (AssignmentResponse)`
 - `ListVehicles(ListVehiclesRequest) returns (ListVehiclesResponse)`
+- `RegisterLandfillVehicle(LandfillVehicleRequest) returns (VehicleResponse)`
+- `RecordLandfillEntry(LandfillEntryRequest) returns (EntryResponse)`
 
 **Integration:**
 
 - GPS tracking via devices in vehicles or driver mobile apps.
 
-#### **5. Notification Service**
+#### **5. Landfill Management Service** (New Component)
+
+**Responsibilities:**
+
+- Manages landfill operations, including vehicle entries and exits.
+- Records data at the landfill gate:
+  - Vehicle registration numbers.
+  - Quantity and nature of waste dumped.
+  - Contact information of individuals or companies dumping waste.
+- Processes cashless payments for landfill dumping fees.
+- Ensures compliance with environmental regulations.
+
+**gRPC Methods:**
+
+- `RegisterLandfillUser(LandfillUserRequest) returns (LandfillUserResponse)`
+- `RecordDumpingActivity(DumpingActivityRequest) returns (DumpingActivityResponse)`
+- `GetLandfillRecords(LandfillRecordsRequest) returns (LandfillRecordsResponse)`
+- `ValidateLandfillPayment(PaymentVerificationRequest) returns (PaymentStatusResponse)`
+
+**Integration:**
+
+- Works closely with Payment Service for processing dumping fees.
+- Integrates with Fleet Management Service for vehicle data.
+
+#### **6. Notification Service**
 
 **Responsibilities:**
 
 - Sends out SMS and push notifications to users.
 - Manages communication preferences.
 - Handles event-based notifications (e.g., payment reminders, collection updates).
+- Notifies landfill users about payment confirmations and compliance requirements.
 
 **gRPC Methods:**
 
@@ -180,12 +210,12 @@ Each microservice is a self-contained unit responsible for a specific business d
 - Connects with SMS gateways (Zamtel APIs).
 - Uses Firebase Cloud Messaging for push notifications.
 
-#### **6. Reporting and Analytics Service**
+#### **7. Reporting and Analytics Service**
 
 **Responsibilities:**
 
 - Generates reports for LISWMC staff.
-- Provides analytics on waste volumes, payment statuses, and operational efficiency.
+- Provides analytics on waste volumes, payment statuses, operational efficiency, and landfill activities.
 - Stores historical data for trend analysis.
 
 **gRPC Methods:**
@@ -198,13 +228,14 @@ Each microservice is a self-contained unit responsible for a specific business d
 
 - Pulls data from other services via gRPC as needed.
 
-#### **7. Authentication and Authorization Service**
+#### **8. Authentication and Authorization Service**
 
 **Responsibilities:**
 
 - Manages user authentication (login/logout).
 - Issues and validates JWT tokens.
 - Enforces role-based access control (RBAC).
+- Supports different roles, including landfill operators.
 
 **gRPC Methods:**
 
@@ -255,6 +286,10 @@ Each microservice is a self-contained unit responsible for a specific business d
 - **Fleet Management Tables:**
   - **Vehicles:** Stores vehicle details, status, and assignments.
   - **Drivers:** Information about drivers, licenses, and contact details.
+- **Landfill Management Tables:** (New Addition)
+  - **LandfillUsers:** Stores information about individuals and companies dumping waste.
+  - **LandfillVehicles:** Records vehicle registration numbers and associated users.
+  - **DumpingActivities:** Logs each dumping event with quantity, nature of waste, and payment status.
 - **Reports Table:** Logs all issue reports and their statuses.
 - **Notifications Table:** Records notifications sent and preferences.
 - **EmergencyCollections Table:** Tracks emergency requests and responses.
@@ -279,6 +314,7 @@ Each microservice is a self-contained unit responsible for a specific business d
 **Authorization:**
 
 - Enforces role-based access control.
+- Supports roles such as Citizen, Franchise Collector, Landfill Operator, and LISWMC Staff.
 - Microservices validate tokens and permissions before processing requests.
 
 **Security Measures:**
@@ -329,7 +365,7 @@ Managed by specific microservices, ensuring a clear separation of concerns.
 **Use Cases:**
 
 - **Notification Dispatch:**
-  - Events like payment confirmations, collection schedule changes trigger notifications.
+  - Events like payment confirmations, collection schedule changes, landfill entry confirmations trigger notifications.
 - **Data Processing:**
   - Offload intensive tasks like analytics processing to background workers.
 
@@ -337,48 +373,63 @@ Managed by specific microservices, ensuring a clear separation of concerns.
 
 ## **Data Flow and Interactions**
 
-### **1. User Registration and Authentication**
+### **1. Landfill Entry and Dumping Process**
 
-- **Step 1:** User submits registration data via client to BFF.
-- **Step 2:** BFF validates input and calls User Management Service via gRPC.
-- **Step 3:** User Management Service creates user record in the database.
-- **Step 4:** Authentication Service issues JWT token.
-- **Step 5:** BFF returns success response with token to client.
+**Step 1:** Vehicle arrives at the landfill gate.
 
-### **2. Payment Processing**
+**Step 2:** Landfill operator uses the **Landfill Management System** (client interface) to:
 
-- **Step 1:** User initiates payment via client to BFF.
-- **Step 2:** BFF calls Payment Service via gRPC with payment details.
-- **Step 3:** Payment Service interacts with mobile money API to initiate transaction.
-- **Step 4:** Mobile money provider sends payment notification to Payment Service.
-- **Step 5:** Payment Service verifies transaction and updates payment status.
-- **Step 6:** Payment Service publishes an event to the message queue.
-- **Step 7:** Notification Service consumes event and sends payment confirmation to user.
-- **Step 8:** BFF can query Payment Service for updated status if needed.
+- **Check Registration:**
+  - If the vehicle and user are pre-registered, retrieve their details.
+  - If not, register the vehicle and user by collecting:
+    - Vehicle registration number.
+    - Driver's name and contact information.
+    - Company or personal address.
 
-### **3. Waste Collection Scheduling and Tracking**
+**Step 3:** Landfill operator records the **Dumping Activity**:
 
-- **Step 1:** Waste Collection Service generates collection schedules using Google Maps API.
-- **Step 2:** Fleet Management Service assigns vehicles and drivers to routes.
-- **Step 3:** Drivers receive routes via the mobile app.
-- **Step 4:** Real-time location updates are sent from driver apps to Fleet Management Service.
-- **Step 5:** BFF fetches vehicle locations from Fleet Management Service to display to users.
+- **Waste Details:**
+  - Quantity of waste (measured by weight or volume).
+  - Nature of waste (type, hazardous materials, etc.).
 
-### **4. Issue Reporting**
+**Step 4:** Landfill operator initiates payment:
 
-- **Step 1:** User reports an issue via client to BFF.
-- **Step 2:** BFF calls Waste Collection Service via gRPC with report details.
-- **Step 3:** Waste Collection Service stores report and publishes an event.
-- **Step 4:** Support Staff receive notification and take action.
-- **Step 5:** Status updates are sent to the user via Notification Service.
+- **BFF Service** receives payment initiation request.
+- BFF calls **Payment Service** via gRPC with payment details.
 
-### **5. Emergency Collections**
+**Step 5:** Payment Service interacts with mobile money API to initiate the transaction.
 
-- **Step 1:** An emergency request is submitted via client or staff portal to BFF.
-- **Step 2:** BFF calls Waste Collection Service to log the request.
-- **Step 3:** Waste Collection Service notifies Fleet Management Service.
-- **Step 4:** Fleet Management Service assigns a vehicle and driver.
-- **Step 5:** Collection is carried out, and status updates are sent to the requester.
+**Step 6:** User completes payment on their mobile device.
+
+**Step 7:** Mobile money provider sends payment notification to Payment Service.
+
+**Step 8:** Payment Service verifies transaction and updates payment status.
+
+**Step 9:** Payment Service notifies **Landfill Management Service** of successful payment.
+
+**Step 10:** Landfill operator receives confirmation and allows vehicle entry.
+
+**Step 11:** **Notification Service** sends payment confirmation and entry receipt to the user.
+
+### **2. User Registration and Authentication (Including Landfill Users)**
+
+- **Same as previous steps**, with the addition that landfill users can be registered either in advance or at the landfill gate.
+
+### **3. Payment Processing for Landfill Fees**
+
+- **Same flow as household payments**, but tailored for landfill dumping fees.
+
+### **4. Data Synchronization for Offline Operations**
+
+- **Challenge:** Landfill may have intermittent connectivity.
+- **Solution:**
+
+  - **Offline Data Capture:**
+    - Landfill Management System operates offline, storing data locally.
+  - **Periodic Synchronization:**
+    - When connectivity is restored, data syncs with backend services.
+  - **Conflict Resolution:**
+    - Implement mechanisms to handle duplicate entries or conflicts during synchronization.
 
 ---
 
@@ -548,7 +599,7 @@ Managed by specific microservices, ensuring a clear separation of concerns.
 **RESTful APIs for BFF Service:**
 
 - **Endpoint Design:**
-  - Use resource-oriented URLs (e.g., `/api/v1/users`, `/api/v1/payments`).
+  - Use resource-oriented URLs (e.g., `/api/v1/users`, `/api/v1/payments`, `/api/v1/landfill`).
   - Follow HTTP methods conventions (GET, POST, PUT, DELETE).
 - **Versioning:**
   - Include version numbers in API paths.
@@ -575,17 +626,16 @@ Managed by specific microservices, ensuring a clear separation of concerns.
 
 ## **Conclusion**
 
-The proposed backend architecture for the Lusaka Integrated Solid Waste Management Platform is designed to be robust, scalable, and secure. By adopting a microservices approach with gRPC for inter-service communication and implementing a BFF pattern, the system ensures high performance and flexibility.
+The updated backend architecture for the Lusaka Integrated Solid Waste Management Platform now fully incorporates the landfill operations, addressing the additional requirements outlined. By integrating the Landfill Management Service and adjusting other components, the system can now:
 
-The architecture addresses all the requirements outlined in the system design, including:
+- Efficiently handle landfill operations, including vehicle registration, waste data capture, and cashless payments via mobile money.
+- Provide comprehensive data for landfill activities, enhancing oversight and compliance.
+- Maintain seamless interactions between all stakeholders, including landfill users (individuals and companies).
 
-- Efficient handling of payments via mobile money platforms.
-- Real-time tracking and management of both franchise and LISWMC fleets.
-- Advanced zone classification using Google Earth Engine APIs.
-- Scalable and maintainable codebase for future enhancements.
+The architecture remains robust, scalable, and secure, leveraging microservices with gRPC communication and a BFF pattern. This ensures high performance and flexibility, accommodating both current functionalities and future enhancements.
 
-This detailed architecture serves as a blueprint for the development team to implement the backend system effectively, ensuring that it meets the needs of all stakeholders involved.
+By adopting this comprehensive architecture, the platform can effectively manage all aspects of waste management in Lusaka, contributing to a cleaner and more sustainable city.
 
 ---
 
-*For any further clarifications or additional information, please feel free to reach out. This document aims to provide a comprehensive understanding of the backend architecture to guide the successful development and deployment of the platform.*
+*For any further clarifications or additional information, please feel free to reach out. This document aims to provide a comprehensive understanding of the updated backend architecture to guide the successful development and deployment of the platform.*
