@@ -213,6 +213,23 @@ Users need to understand the status of their payments to prevent confusion and r
 - Enables proactive issue resolution.
 - Improves system reliability.
 
+### **Proposed Enhancements for Tap-Based Payments in High-Density Neighborhoods**
+
+In some high-density areas, water and garbage collection fees are combined and tied to a shared water tap that may serve multiple households (up to five or six). Traditionally, a single fee has been paid per tap, but to accommodate illegal connections and provide accountability, the system must:
+
+1. Record the precise location of each tap (GPS coordinates or a reference to a zone).  
+2. Allow for either:  
+   • "Shared" billing where only one payment is expected per tap.  
+   • "Individualized" billing where each tenant or occupant linked to a specific tap pays separately—even if they share water from the same tap.  
+3. Flag and track any suspicious connections or unregistered households that use the same tap.
+4. Store the number of tenants or occupants per tap to determine if fees are being underpaid.
+
+### **Technical Considerations**
+
+- When initiating mobile money transactions, the Payment Service should accept a "TapID" in addition to the usual "UserID," allowing the system to determine which tenants or households are linked to that tap.  
+- Leveraging idempotent payment requests is even more critical here to prevent double charging any tenant or the entire tap.  
+- The callback workflow (for confirming mobile money payments) must verify the tap or tenant associations to ensure correct attribution of fees.
+
 ---
 
 ## **Updated Payment Service Architecture**

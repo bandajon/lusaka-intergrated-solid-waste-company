@@ -59,13 +59,18 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
 - Dispatch emergency collections.
 - Configure AI assistants and scheduling parameters.
 
-### **2. Franchise Collectors**
+### **2. Franchise Collectors and Community-Based Enterprises (CBEs)**
 
-- Register their companies and upload required documents.
-- Manage fleet and staff.
-- Register users during collection.
-- Access assigned zones and routes.
-- Utilize AI-generated schedules and routes.
+- Both Franchise Collectors and CBEs apply for admission to the company (LISWMC) and must be actively monitored.
+- Each entity must register by uploading required documents (business registration, capacity details, etc.).
+- A minimum volume of garbage must be delivered to the dumpsite weekly to maintain their contract.
+- The system can automatically flag collectors/CBEs who fail to meet performance targets, enabling LISWMC staff to assign standby companies.
+- An automated scoring system calculates a performance score based on:
+  1. Weekly garbage delivered (vs. the required minimum).
+  2. Customer complaints or satisfaction ratings.
+  3. Ability to separate recyclables or hazardous waste from general waste.
+- Standby companies are maintained in the system to replace underperforming entities if necessary.
+- Fleet and staff management, zone assignments, and AI-driven scheduling remain similar to existing Franchise Collector processes.
 
 ### **3. Landfill Operators**
 
@@ -107,6 +112,26 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
 - Declare waste type and quantity before dumping.
 - Make payments for landfill dumping fees via mobile money.
 
+### **9. Tap Tenants**
+
+- **Regular Residential Tenants**
+  • Standard households not on tap-based billing.
+  • Billed individually for waste collection services.
+
+- **Tap Billing Tenants**
+  • High-density neighborhood occupants sharing a single tap.
+  • Can be "shared" or "individualized" in terms of waste billing.
+
+- **Business Tenants**
+  • Registered businesses (e.g., small shops, offices, restaurants).
+  • Must be able to list business details on the platform (name, address, registration ID, etc.).
+  • Can request off-schedule pickups or additional services as needed.
+
+- **Specialized Waste Generators**
+  • Large producers like malls and factories with higher waste volumes.
+  • Often require custom contracts and off-schedule pickups.
+  • Potential for advanced tracking of unique or regulated waste.
+
 ---
 
 ## **System Components**
@@ -119,6 +144,7 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
 - **Authentication & Authorization:** OAuth 2.0, JWT tokens, and role-based access control.
 - **API Documentation:** Swagger/OpenAPI.
 - **AI Integration:** Incorporate AI modules for scheduling and route optimization.
+- **Inter-Service Communication:** All microservices communicate with each other via gRPC for high-performance, low-latency data exchange. gRPC also enforces strict contracts through Protocol Buffers, ensuring consistency and reliability across services.
 
 ### **b. Database Design (PostgreSQL)**
 
@@ -127,8 +153,9 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
 1. **Users**
    - `UserID`, `Name`, `PhoneNumbers`, `Addresses`, `PaymentStatus`, `Notifications`, `PlusCode`, `Occupants`, `AssignedCollectionPointID` (optional).
 
-2. **FranchiseCollectors**
-   - `CollectorID`, `CompanyInfo`, `Documents`, `AssignedZones`, `FleetDetails`, `Status`.
+2. **Collectors**
+   - `CollectorID`, `CollectorType`, `CompanyInfo`, `Documents`, `AssignedZones`, `FleetDetails`, `Status`.
+   - The collector_type field indicates whether the collector is a "Franchise" or a "Community-Based Enterprise (CBE)".
 
 3. **LISWMCFleet**
    - `VehicleID`, `VehicleType`, `CurrentLocation`, `RouteID`, `DriverInfo`, `Status`, `AssignedTasks`.
@@ -177,6 +204,35 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
     - **New Entity Added**
     - `RecommendationID`, `ZoneID` or `RouteID`, `DateTime`, `SuggestedAction`, `Reasoning`, `Implemented`.
 
+#### **Additional Consideration for Tap-Based Billing**
+- **Taps**  
+  • Each tap is identified by a unique TapID and may be shared by multiple tenants or households.  
+  • Taps can be flagged for illegal connections if unregistered occupants are discovered using them.
+  
+- **TapTenants**  
+  • Associates multiple tenants with a single TapID.  
+  • Tracks whether each tenant is paying individually or under a shared fee model.  
+  • Records the coordinates or zone location of the tap (to assist in verifying illegal connections).
+
+### **Tenant Types**
+- **Regular Residential Tenants**  
+  • Standard households not on tap-based billing.  
+  • Billed individually for waste collection services.  
+
+- **Tap Billing Tenants**  
+  • High-density neighborhood occupants sharing a single tap.  
+  • Can be "shared" or "individualized" in terms of waste billing.  
+
+- **Business Tenants**  
+  • Registered businesses (e.g., small shops, offices, restaurants).  
+  • Must be able to list business details on the platform (name, address, registration ID, etc.).  
+  • Can request off-schedule pickups or additional services as needed.  
+
+- **Specialized Waste Generators**  
+  • Large producers like malls and factories with higher waste volumes.  
+  • Often require custom contracts and off-schedule pickups.  
+  • Potential for advanced tracking of unique or regulated waste.
+
 ### **c. Frontend Clients**
 
 #### **i. Mobile Applications (Android/iOS)**
@@ -220,7 +276,9 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
 
 #### **iii. USSD Service**
 
-- **Integration:** Partnership with Zamtel for USSD services.
+- **Integration:** USSD service is offered across all three major networks (Zamtel, MTN, and Airtel).
+However, the main mobile money account is maintained with Zamtel, which can receive money from any network.
+
 - **Features:**
   - User registration.
   - View next collection dates.
@@ -417,7 +475,9 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
 
 - **Payment Methods:**
   - **Phase 1:** MTN Mobile Money, Airtel Money, Zamtel Kwacha.
-  - **Phase 2:** Integration with bank payments.
+  - **Phase 2 (Planned):** Potential integration with bank payments or other methods.
+  - **All Payments:** At present, all user and landfill fees must be processed exclusively via Mobile Money (Airtel, MTN, Zamtel).
+
 - **Payment Reminders:**
   - Automated SMS notifications for due payments.
 - **Payment Processing:**
@@ -425,6 +485,20 @@ The system is designed as a headless backend, developed in Go (Golang) with Post
 - **Overdue Accounts:**
   - Visual indicators on maps (e.g., red highlights).
   - Generate lists of overdue accounts.
+
+#### **Differentiated Billing Models**
+1. **Regular Residential Billing**  
+   - Standard household billing, either monthly or pay-as-you-go.  
+2. **Tap-Based Payment Model in High-Density Areas**  
+   - Single fee per tap (legacy model) or individual fees for each tenant sharing the same tap.  
+   - Tap location tracking to identify illegal or unregistered use.  
+3. **Business/Commercial Billing**  
+   - Businesses can register their entities and pay for scheduled or on-demand pickups.  
+   - May have tiered pricing based on estimated waste volume or type of business.  
+4. **Specialized Waste Generators**  
+   - Large producers like malls and factories with higher waste volumes.  
+   - Often require custom contracts and off-schedule pickups.  
+   - Potential for advanced tracking of unique or regulated waste.
 
 ### **11. Reporting Issues**
 

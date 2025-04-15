@@ -4,24 +4,46 @@
 
 ## **Table of Contents**
 
-1. [Introduction](#introduction)
-2. [Architecture Overview](#architecture-overview)
-3. [Core Components](#core-components)
-   - a. [Backend For Frontend (BFF) Service](#a-backend-for-frontend-bff-service)
-   - b. [Microservices](#b-microservices)
-   - c. [Inter-Service Communication with gRPC](#c-inter-service-communication-with-grpc)
-   - d. [Database Layer](#d-database-layer)
-   - e. [Authentication and Authorization Service](#e-authentication-and-authorization-service)
-   - f. [External Integrations](#f-external-integrations)
-   - g. [Messaging and Notification Service](#g-messaging-and-notification-service)
-4. [Data Flow and Interactions](#data-flow-and-interactions)
-5. [Technology Stack](#technology-stack)
-6. [Scalability and Performance](#scalability-and-performance)
-7. [Security Considerations](#security-considerations)
-8. [Deployment and Infrastructure](#deployment-and-infrastructure)
-9. [Monitoring and Logging](#monitoring-and-logging)
-10. [API Design and Documentation](#api-design-and-documentation)
-11. [Conclusion](#conclusion)
+- [**Comprehensive Backend Architecture for the Lusaka Integrated Solid Waste Management Platform**](#comprehensive-backend-architecture-for-the-lusaka-integrated-solid-waste-management-platform)
+  - [**Table of Contents**](#table-of-contents)
+  - [**Introduction**](#introduction)
+  - [**Architecture Overview**](#architecture-overview)
+  - [**Core Components**](#core-components)
+    - [**a. Backend For Frontend (BFF) Service**](#a-backend-for-frontend-bff-service)
+    - [**b. Microservices**](#b-microservices)
+      - [**1. User Management Service**](#1-user-management-service)
+      - [**2. Payment Service**](#2-payment-service)
+      - [**3. Waste Collection Service**](#3-waste-collection-service)
+      - [**4. Fleet Management Service**](#4-fleet-management-service)
+      - [**5. Landfill Management Service** (New Component)](#5-landfill-management-service-new-component)
+      - [**6. Notification Service**](#6-notification-service)
+      - [**7. Reporting and Analytics Service**](#7-reporting-and-analytics-service)
+      - [**8. Authentication and Authorization Service**](#8-authentication-and-authorization-service)
+    - [**c. Inter-Service Communication with gRPC**](#c-inter-service-communication-with-grpc)
+    - [**d. Database Layer**](#d-database-layer)
+      - [**New or Updated Entities**](#new-or-updated-entities)
+    - [**e. Authentication and Authorization Service**](#e-authentication-and-authorization-service)
+    - [**f. External Integrations**](#f-external-integrations)
+      - [**1. Payment Gateways**](#1-payment-gateways)
+      - [**2. Mapping and Geolocation Services**](#2-mapping-and-geolocation-services)
+      - [**3. Messaging Services**](#3-messaging-services)
+    - [**g. Messaging and Notification Service**](#g-messaging-and-notification-service)
+  - [**Data Flow and Interactions**](#data-flow-and-interactions)
+    - [**1. Landfill Entry and Dumping Process**](#1-landfill-entry-and-dumping-process)
+    - [**2. User Registration and Authentication (Including Landfill Users)**](#2-user-registration-and-authentication-including-landfill-users)
+    - [**3. Payment Processing for Landfill Fees**](#3-payment-processing-for-landfill-fees)
+    - [**4. Data Synchronization for Offline Operations**](#4-data-synchronization-for-offline-operations)
+  - [**Technology Stack**](#technology-stack)
+  - [**Scalability and Performance**](#scalability-and-performance)
+  - [**Security Considerations**](#security-considerations)
+  - [**Deployment and Infrastructure**](#deployment-and-infrastructure)
+  - [**Monitoring and Logging**](#monitoring-and-logging)
+  - [**API Design and Documentation**](#api-design-and-documentation)
+  - [**Conclusion**](#conclusion)
+  - [**Conclusion**](#conclusion-1)
+  - [**Conclusion**](#conclusion-2)
+  - [**Conclusion**](#conclusion-3)
+  - [**Conclusion**](#conclusion-4)
 
 ---
 
@@ -303,6 +325,55 @@ Each microservice is a self-contained unit responsible for a specific business d
 
 - Implement transactions where necessary to maintain data integrity.
 - Use patterns like **Saga** for managing distributed transactions across microservices.
+
+**Data Protection:**
+
+- **Encryption in Transit:** Use TLS/SSL for all external and internal communications.
+- **Encryption at Rest:** Encrypt sensitive data stored in databases and backups.
+
+**Authentication and Authorization:**
+
+- Implement OAuth 2.0 protocols.
+- Use JWTs with proper expiration and refresh mechanisms.
+- Enforce role-based access control across services.
+
+**Input Validation and Sanitization:**
+
+- Validate all inputs at the BFF and microservice levels.
+- Protect against SQL injection, XSS, and other injection attacks.
+
+**Rate Limiting and Throttling:**
+
+- Prevent abuse by limiting the number of requests per user or IP.
+- Implement at the API Gateway and BFF levels.
+
+**Security Audits and Compliance:**
+
+- Regularly perform security assessments and penetration testing.
+- Ensure compliance with local data protection regulations.
+
+**Secrets Management:**
+
+- Store API keys, passwords, and certificates securely using vault services or encrypted environment variables.
+
+**Logging and Monitoring:**
+
+- Log security-related events for auditing purposes.
+- Monitor for suspicious activities and set up alerts.
+
+#### **New or Updated Entities**
+- **Taps Table**  
+  - **tap_id** (PK)  
+  - **location** (GPS coordinates or reference to a zone)  
+  - **status** (e.g., active, flagged for illegal connection)  
+  - **registration_details** (owner, creation date, etc.)  
+
+- **TapTenants Table**  
+  - **tap_id** (FK to Taps)  
+  - **tenant_id** (FK to Users)  
+  - **fee_type** (shared or individual)  
+  - **start_date** (when the tenant began using this tap)  
+  - **is_active** (whether the tenant still uses this tap)
 
 ### **e. Authentication and Authorization Service**
 
@@ -621,6 +692,84 @@ Managed by specific microservices, ensuring a clear separation of concerns.
 - **Swagger/OpenAPI:** Generate documentation for RESTful APIs.
 - **gRPC Tools:** Use tools like **grpc-gateway** and **protoc-gen-doc** for documentation.
 - **Developer Portal:** Provide interactive documentation and API testing tools.
+
+---
+
+## **Conclusion**
+
+The updated backend architecture for the Lusaka Integrated Solid Waste Management Platform now fully incorporates the landfill operations, addressing the additional requirements outlined. By integrating the Landfill Management Service and adjusting other components, the system can now:
+
+- Efficiently handle landfill operations, including vehicle registration, waste data capture, and cashless payments via mobile money.
+- Provide comprehensive data for landfill activities, enhancing oversight and compliance.
+- Maintain seamless interactions between all stakeholders, including landfill users (individuals and companies).
+
+The architecture remains robust, scalable, and secure, leveraging microservices with gRPC communication and a BFF pattern. This ensures high performance and flexibility, accommodating both current functionalities and future enhancements.
+
+By adopting this comprehensive architecture, the platform can effectively manage all aspects of waste management in Lusaka, contributing to a cleaner and more sustainable city.
+
+---
+
+*For any further clarifications or additional information, please feel free to reach out. This document aims to provide a comprehensive understanding of the updated backend architecture to guide the successful development and deployment of the platform.*
+- **Swagger/OpenAPI:** Generate documentation for RESTful APIs.
+- **gRPC Tools:** Use tools like **grpc-gateway** and **protoc-gen-doc** for documentation.
+- **Developer Portal:** Provide interactive documentation and API testing tools.
+
+---
+
+## **Conclusion**
+
+The updated backend architecture for the Lusaka Integrated Solid Waste Management Platform now fully incorporates the landfill operations, addressing the additional requirements outlined. By integrating the Landfill Management Service and adjusting other components, the system can now:
+
+- Efficiently handle landfill operations, including vehicle registration, waste data capture, and cashless payments via mobile money.
+- Provide comprehensive data for landfill activities, enhancing oversight and compliance.
+- Maintain seamless interactions between all stakeholders, including landfill users (individuals and companies).
+
+The architecture remains robust, scalable, and secure, leveraging microservices with gRPC communication and a BFF pattern. This ensures high performance and flexibility, accommodating both current functionalities and future enhancements.
+
+By adopting this comprehensive architecture, the platform can effectively manage all aspects of waste management in Lusaka, contributing to a cleaner and more sustainable city.
+
+---
+
+*For any further clarifications or additional information, please feel free to reach out. This document aims to provide a comprehensive understanding of the updated backend architecture to guide the successful development and deployment of the platform.*
+- **gRPC Tools:** Use tools like **grpc-gateway** and **protoc-gen-doc** for documentation.
+- **Developer Portal:** Provide interactive documentation and API testing tools.
+
+---
+
+## **Conclusion**
+
+The updated backend architecture for the Lusaka Integrated Solid Waste Management Platform now fully incorporates the landfill operations, addressing the additional requirements outlined. By integrating the Landfill Management Service and adjusting other components, the system can now:
+
+- Efficiently handle landfill operations, including vehicle registration, waste data capture, and cashless payments via mobile money.
+- Provide comprehensive data for landfill activities, enhancing oversight and compliance.
+- Maintain seamless interactions between all stakeholders, including landfill users (individuals and companies).
+
+The architecture remains robust, scalable, and secure, leveraging microservices with gRPC communication and a BFF pattern. This ensures high performance and flexibility, accommodating both current functionalities and future enhancements.
+
+By adopting this comprehensive architecture, the platform can effectively manage all aspects of waste management in Lusaka, contributing to a cleaner and more sustainable city.
+
+---
+
+*For any further clarifications or additional information, please feel free to reach out. This document aims to provide a comprehensive understanding of the updated backend architecture to guide the successful development and deployment of the platform.*
+- **Developer Portal:** Provide interactive documentation and API testing tools.
+
+---
+
+## **Conclusion**
+
+The updated backend architecture for the Lusaka Integrated Solid Waste Management Platform now fully incorporates the landfill operations, addressing the additional requirements outlined. By integrating the Landfill Management Service and adjusting other components, the system can now:
+
+- Efficiently handle landfill operations, including vehicle registration, waste data capture, and cashless payments via mobile money.
+- Provide comprehensive data for landfill activities, enhancing oversight and compliance.
+- Maintain seamless interactions between all stakeholders, including landfill users (individuals and companies).
+
+The architecture remains robust, scalable, and secure, leveraging microservices with gRPC communication and a BFF pattern. This ensures high performance and flexibility, accommodating both current functionalities and future enhancements.
+
+By adopting this comprehensive architecture, the platform can effectively manage all aspects of waste management in Lusaka, contributing to a cleaner and more sustainable city.
+
+---
+
+*For any further clarifications or additional information, please feel free to reach out. This document aims to provide a comprehensive understanding of the updated backend architecture to guide the successful development and deployment of the platform.*
 
 ---
 
