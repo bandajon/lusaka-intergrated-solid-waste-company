@@ -1,0 +1,17 @@
+License Plate Cleaning Report
+Generated on: 2025-05-05 12:39:52.394644
+Input file: extracted_vehicles.csv
+Output file: cleaned_vehicles_20250505_123952.csv
+
+Results:
+  - Original records: 8073
+  - Cleaned records: 5868
+  - Rejected plates: 2205 (27.31%)
+
+Rules applied:
+  - Plates with only numbers were rejected
+  - Plates with only letters were rejected
+  - All spaces were removed
+  - Plates with decimal points had the decimal part removed
+  - All plates were standardized to Zambian formats
+  - Company IDs were cleared for manual association

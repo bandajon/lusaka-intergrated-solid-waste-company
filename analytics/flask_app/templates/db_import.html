@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+
+{% block title %}Import to Database - LISWMC{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Import Form Card -->
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden mb-6">
+        <div class="border-b border-gray-200 px-6 py-4">
+            <h2 class="text-xl font-medium text-gray-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12" />
+                </svg>
+                Import Data to Database
+            </h2>
+        </div>
+        <div class="px-6 py-5">
+            <form action="{{ url_for('main.db_import') }}" method="post">
+                <div class="space-y-5">
+                    <div>
+                        <label for="filename" class="block text-sm font-medium text-gray-700 mb-1">Select file to import:</label>
+                        <select class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md" id="filename" name="filename" required>
+                            <option value="" selected disabled>Choose a file...</option>
+                            {% for file in csv_files %}
+                            <option value="{{ file }}">{{ file }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label for="table" class="block text-sm font-medium text-gray-700 mb-1">Select target table:</label>
+                        <select class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md" id="table" name="table" required>
+                            <option value="" selected disabled>Choose a table...</option>
+                            {% for table in tables %}
+                            <option value="{{ table }}">{{ table|capitalize }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="rounded-md bg-yellow-50 p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <h3 class="text-sm font-medium text-yellow-800">Warning</h3>
+                                <div class="mt-2 text-sm text-yellow-700">
+                                    <p>Importing will generate new UUIDs for all records to avoid conflicts. For vehicle imports, duplicate license plates will be skipped.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12" />
+                            </svg>
+                            Import to Database
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Guidelines Card -->
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+        <div class="border-b border-gray-200 px-6 py-4">
+            <h2 class="text-xl font-medium text-gray-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Import Guidelines
+            </h2>
+        </div>
+        <div class="px-6 py-5">
+            <div class="space-y-6">
+                <div>
+                    <h3 class="text-base font-medium text-gray-700 mb-2">Vehicle Imports</h3>
+                    <ul class="list-disc pl-5 space-y-1 text-sm text-gray-600">
+                        <li>Must include license_plate column</li>
+                        <li>License plates will be standardized</li>
+                        <li>Duplicate license plates will be skipped</li>
+                        <li>New UUIDs will be generated for all vehicles</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-base font-medium text-gray-700 mb-2">Company Imports</h3>
+                    <ul class="list-disc pl-5 space-y-1 text-sm text-gray-600">
+                        <li>Must include name column</li>
+                        <li>Duplicate company names will be skipped</li>
+                        <li>Required fields (primary_contact_name, primary_contact_phone) will be populated with defaults if missing</li>
+                        <li>New UUIDs will be generated for all companies</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-base font-medium text-gray-700 mb-2">General Notes</h3>
+                    <ul class="list-disc pl-5 space-y-1 text-sm text-gray-600">
+                        <li>A mapping file will be created to track old IDs to new UUIDs</li>
+                        <li>Statistics will be shown after import</li>
+                        <li>It's recommended to clean data before importing</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
