@@ -27,32 +27,33 @@ def debug_print(*args, **kwargs):
 
 debug_print("Loading full analytics dashboard...")
 
-# Get data file paths
+# Configure database connection
 base_dir = os.path.dirname(__file__)
-weigh_events_file = os.path.join(base_dir, 'extracted_weigh_events.csv')
-vehicles_file = os.path.join(base_dir, 'extracted_vehicles.csv')
-companies_file = os.path.join(base_dir, 'extracted_companies.csv')
+debug_print("Using database connection for data")
 
-debug_print(f"Data files:")
-debug_print(f"  Weigh events: {weigh_events_file} (exists: {os.path.exists(weigh_events_file)})")
-debug_print(f"  Vehicles: {vehicles_file} (exists: {os.path.exists(vehicles_file)})")
-debug_print(f"  Companies: {companies_file} (exists: {os.path.exists(companies_file)})")
+# Import database connection module
+from database_connection import read_companies, read_vehicles, read_weigh_events, check_connection
 
-# Load datasets
+# Check database connection
+connection_status, message = check_connection()
+debug_print(f"Database connection status: {connection_status}")
+debug_print(f"Database message: {message}")
+
+# Load datasets from database
 def load_data():
-    debug_print("Loading datasets...")
+    debug_print("Loading datasets from database...")
     
-    # Load the datasets
-    debug_print(f"Reading weigh events from {weigh_events_file}")
-    weigh_df = pd.read_csv(weigh_events_file)
+    # Load data directly from database
+    debug_print("Reading weigh events from database")
+    weigh_df = read_weigh_events(use_csv_fallback=True)
     debug_print(f"Loaded {len(weigh_df)} weigh event records")
     
-    debug_print(f"Reading vehicles from {vehicles_file}")
-    vehicles_df = pd.read_csv(vehicles_file)
+    debug_print("Reading vehicles from database")
+    vehicles_df = read_vehicles()
     debug_print(f"Loaded {len(vehicles_df)} vehicle records")
     
-    debug_print(f"Reading companies from {companies_file}")
-    companies_df = pd.read_csv(companies_file)
+    debug_print("Reading companies from database")
+    companies_df = read_companies()
     debug_print(f"Loaded {len(companies_df)} company records")
     
     # Convert event_time to datetime
@@ -177,6 +178,9 @@ def calculate_net_weights(df):
         return net_weights_df
     return pd.DataFrame()
 
+# Database polling interval in seconds
+DATABASE_POLL_INTERVAL = 300  # 5 minutes
+
 # Create a Dash app
 app = dash.Dash(
     __name__, 
@@ -184,10 +188,12 @@ app = dash.Dash(
         "https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
     ],
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
-    suppress_callback_exceptions=True
+    suppress_callback_exceptions=True,
+    title="LISWMC Full Analytics Dashboard"
 )
 
 # Load data and calculate net weights
+last_refresh_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 try:
     merged_df, weigh_df, vehicles_df, companies_df = load_data()
     debug_print(f"Loaded data:")
@@ -313,7 +319,12 @@ app.layout = html.Div([
                     html.Button(
                         "Reset Filters", 
                         id='reset-filters', 
-                        className="w-full px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                        className="w-full px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 mb-2"
+                    ),
+                    html.Button(
+                        "Refresh Data", 
+                        id='manual-refresh', 
+                        className="w-full px-4 py-2 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
                     )
                 ], className="mt-6"),
                 
@@ -376,13 +387,33 @@ app.layout = html.Div([
     
     # Footer
     html.Footer([
-        html.P("© 2025 Lusaka Integrated Solid Waste Management Company", 
-               className="text-center text-sm text-gray-500")
+        html.Div([
+            html.P("© 2025 Lusaka Integrated Solid Waste Management Company", 
+                   className="text-center text-sm text-gray-500"),
+            html.P(id='last-refresh-time', 
+                   className="text-center text-xs text-gray-400 mt-1")
+        ])
     ], className="w-full py-4 mt-8 bg-gray-100"),
     
     # Hidden div to store filtered data
     dcc.Store(id='filtered-data'),
+    
+    # Database polling interval component
+    dcc.Interval(
+        id='database-poll-interval',
+        interval=DATABASE_POLL_INTERVAL * 1000,  # Convert to milliseconds
+        n_intervals=0
+    ),
 ])
+
+# Set initial refresh time
+@app.callback(
+    Output('last-refresh-time', 'children'),
+    [],
+    prevent_initial_call=False
+)
+def set_initial_refresh_time():
+    return f"Last database refresh: {last_refresh_time}"
 
 # Populate filter dropdowns on load
 @app.callback(
@@ -472,10 +503,13 @@ def filter_data(n_clicks, start_date, end_date, delivery_type, selected_companie
         if start_date and end_date:
             try:
                 start_date = pd.to_datetime(start_date)
-                end_date = pd.to_datetime(end_date)
+                # Add one day to end_date to include the full end date
+                end_date = pd.to_datetime(end_date) + timedelta(days=1)
                 if 'entry_time' in filtered_df.columns:
+                    # Ensure entry_time is datetime
+                    filtered_df['entry_time'] = pd.to_datetime(filtered_df['entry_time'])
                     filtered_df = filtered_df[(filtered_df['entry_time'] >= start_date) & 
-                                            (filtered_df['entry_time'] <= end_date)]
+                                            (filtered_df['entry_time'] < end_date)]
             except Exception as e:
                 print(f"Date filtering error: {e}")
         
@@ -1328,6 +1362,42 @@ def export_data(n_clicks, json_data):
 
 # Add a dummy div for the export callback
 app.layout.children.append(html.Div(id='dummy-export-output', style={'display': 'none'}))
+
+# Callback to periodically refresh data from database
+@app.callback(
+    [Output('last-refresh-time', 'children'),
+     Output('filtered-data', 'data', allow_duplicate=True)],
+    [Input('database-poll-interval', 'n_intervals'),
+     Input('manual-refresh', 'n_clicks')],
+    prevent_initial_call=True
+)
+def refresh_from_database(n_intervals, n_clicks):
+    """Refresh data from database on a schedule"""
+    try:
+        debug_print(f"Database refresh triggered (interval={n_intervals})")
+        global merged_df, weigh_df, vehicles_df, companies_df, net_weights_df
+        
+        # Load fresh data from database
+        merged_df, weigh_df, vehicles_df, companies_df = load_data()
+        debug_print(f"Refreshed data from database:")
+        debug_print(f"- {len(weigh_df)} weigh events")
+        debug_print(f"- {len(weigh_df[weigh_df['event_type'] == 1])} entry events")
+        debug_print(f"- {len(weigh_df[weigh_df['event_type'] == 2])} exit events")
+        
+        # Recalculate net weights with fresh data
+        net_weights_df = calculate_net_weights(merged_df)
+        debug_print(f"Recalculated {len(net_weights_df)} paired entry/exit records")
+        
+        # Return updated data
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return f"Last database refresh: {current_time}", net_weights_df.to_json(date_format='iso', orient='split')
+    
+    except Exception as e:
+        import traceback
+        debug_print(f"Error refreshing from database: {e}")
+        debug_print(traceback.format_exc())
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return f"Last refresh attempt: {current_time} (failed)", dash.no_update
 
 # Run the app
 if __name__ == '__main__':

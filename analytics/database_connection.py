@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 
 # Database connection parameters
 DB_PARAMS = {
-    'host': 'agripredict-prime-prod.caraj6fzskso.eu-west-2.rds.amazonaws.com',
-    'database': 'users',
-    'user': 'agripredict',
-    'password': 'Wee8fdm0k2!!',
-    'port': 5432
+    'host': os.getenv('DB_HOST', 'agripredict-prime-prod.caraj6fzskso.eu-west-2.rds.amazonaws.com'),
+    'database': os.getenv('DB_NAME', 'users'),
+    'user': os.getenv('DB_USER', 'agripredict'),
+    'password': os.getenv('DB_PASSWORD', 'Wee8fdm0k2!!'),
+    'port': int(os.getenv('DB_PORT', 5432))
 }
 
 # Database tables
@@ -105,6 +105,32 @@ def execute_query(query, params=None):
     except Exception as e:
         logger.error(f"Error executing query: {e}")
         return pd.DataFrame()
+
+def write_weigh_event(event_data):
+    """Write a single weigh event to the database"""
+    try:
+        engine = get_db_engine()
+        with engine.connect() as conn:
+            # Convert to DataFrame for easier insertion
+            df = pd.DataFrame([event_data])
+            df.to_sql(TABLES['weigh_event'], conn, if_exists='append', index=False)
+            logger.info(f"Successfully wrote weigh event to database")
+            return True
+    except Exception as e:
+        logger.error(f"Error writing weigh event to database: {e}")
+        return False
+
+def write_multiple_weigh_events(events_df):
+    """Write multiple weigh events to the database"""
+    try:
+        engine = get_db_engine()
+        with engine.connect() as conn:
+            events_df.to_sql(TABLES['weigh_event'], conn, if_exists='append', index=False)
+            logger.info(f"Successfully wrote {len(events_df)} weigh events to database")
+            return True
+    except Exception as e:
+        logger.error(f"Error writing weigh events to database: {e}")
+        return False
 
 def check_connection():
     """Check if database connection is working"""

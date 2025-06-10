@@ -14,12 +14,12 @@ import numpy as np
 from datetime import datetime, timedelta
 
 import dash
-from dash import dcc, html, Input, Output, State, callback, dash_table
+from dash import dcc, html, Input, Output, State, callback, dash_table, callback_context
 import plotly.express as px
 import plotly.graph_objects as go
 
 # Import database connection module
-from database_connection import read_companies, read_vehicles, read_weigh_events, check_connection
+from database_connection import read_companies, read_vehicles, read_weigh_events, check_connection, write_multiple_weigh_events
 
 # Enable debug mode for console output
 DEBUG = True
@@ -104,6 +104,26 @@ def load_data():
         weigh_df['is_recycle'] = weigh_df['remarks'].str.contains('R', case=False, na=False)
         weigh_df['delivery_type'] = weigh_df['is_recycle'].map({True: 'Recycle Collection', False: 'Normal Disposal'})
         
+        # Calculate initial net weights for historical tare weight estimation
+        debug_print("Calculating initial net weights for historical data...")
+        initial_net_weights_df = calculate_net_weights(weigh_df)
+        
+        # Auto-close sessions that have been open for more than 2 hours
+        debug_print("Checking for open sessions to auto-close...")
+        weigh_df = auto_close_sessions(weigh_df, initial_net_weights_df, max_hours=2)
+        
+        # Recalculate date components for any new synthetic exit events
+        weigh_df['event_time'] = pd.to_datetime(weigh_df['event_time']).dt.tz_localize(None)
+        weigh_df['date'] = weigh_df['event_time'].dt.date
+        weigh_df['day'] = weigh_df['event_time'].dt.day
+        weigh_df['month'] = weigh_df['event_time'].dt.month
+        weigh_df['month_name'] = weigh_df['event_time'].dt.strftime('%B')
+        weigh_df['year'] = weigh_df['event_time'].dt.year
+        weigh_df['day_of_week'] = weigh_df['event_time'].dt.day_name()
+        weigh_df['day_of_week_num'] = weigh_df['event_time'].dt.dayofweek
+        weigh_df['hour'] = weigh_df['event_time'].dt.hour
+        weigh_df['week'] = weigh_df['event_time'].dt.isocalendar().week
+        
         # Merge with vehicle and company data
         try:
             merged_df = weigh_df.merge(vehicles_df, on='vehicle_id', how='left')
@@ -114,12 +134,20 @@ def load_data():
             
             # Check if name column exists in companies_df
             if 'name' in companies_df.columns:
-                merged_df = merged_df.merge(companies_df[['company_id', 'name']], on='company_id', how='left')
+                # Include type_code in the merge for pricing calculations
+                company_cols = ['company_id', 'name']
+                if 'type_code' in companies_df.columns:
+                    company_cols.append('type_code')
+                merged_df = merged_df.merge(companies_df[company_cols], on='company_id', how='left')
                 merged_df.rename(columns={'name': 'company_name'}, inplace=True)
             else:
-                # Add placeholder for company_name
+                # Add placeholder for company_name and type_code
                 merged_df['company_name'] = 'Unknown'
-                
+                merged_df['type_code'] = None
+            
+            # Ensure company_name is properly formatted as strings
+            merged_df['company_name'] = merged_df['company_name'].astype(str)
+            
             return merged_df, weigh_df, vehicles_df, companies_df
             
         except Exception as e:
@@ -127,6 +155,8 @@ def load_data():
             # Create basic merged_df without joins
             merged_df = weigh_df.copy()
             merged_df['company_name'] = 'Unknown'
+            # Ensure company_name is properly formatted as strings
+            merged_df['company_name'] = merged_df['company_name'].astype(str)
             return merged_df, weigh_df, vehicles_df, companies_df
             
     except Exception as e:
@@ -135,16 +165,303 @@ def load_data():
         debug_print(traceback.format_exc())
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+
+def calculate_tiered_pricing(net_weight_kg, company_type, is_recycle=False):
+    """
+    Calculate pricing based on company type and tonnage tiers.
+    
+    Args:
+        net_weight_kg: Weight in kilograms
+        company_type: Company type code (6, 7, 8, or other)
+        is_recycle: Whether this is a recycle collection
+    
+    Returns:
+        tuple: (fee_per_tonne, fee_amount, pricing_tier)
+    """
+    if is_recycle:
+        return 0, 0, "Recycle (No Charge)"
+    
+    # Convert to tonnes and apply ceiling (no fractional billing)
+    tonnes = int(net_weight_kg / 1000) + (1 if (net_weight_kg % 1000) > 0 else 0)
+    
+    if company_type == 8:
+        # Type 8 doesn't pay anything
+        return 0, 0, "Type 8 (No Charge)"
+    elif company_type == 7:
+        # Type 7: K50 per tonne
+        fee_per_tonne = 50
+        fee_amount = tonnes * fee_per_tonne
+        return fee_per_tonne, fee_amount, f"Type 7 (K{fee_per_tonne}/tonne)"
+    elif company_type == 6:
+        # Type 6: Tiered pricing
+        # K50 from 0 to 5 tonnes
+        # K100 from 5.00001 to 10 tonnes  
+        # K150 from 10.00001 tonnes
+        if tonnes <= 5:
+            fee_per_tonne = 50
+            fee_amount = tonnes * fee_per_tonne
+            tier = "0-5 tonnes"
+        elif tonnes <= 10:
+            fee_per_tonne = 100
+            fee_amount = tonnes * fee_per_tonne
+            tier = "5-10 tonnes"
+        else:
+            fee_per_tonne = 150
+            fee_amount = tonnes * fee_per_tonne
+            tier = "10+ tonnes"
+        return fee_per_tonne, fee_amount, f"Type 6 ({tier}: K{fee_per_tonne}/tonne)"
+    else:
+        # Everyone else: K150 per tonne
+        fee_per_tonne = 150
+        fee_amount = tonnes * fee_per_tonne
+        return fee_per_tonne, fee_amount, f"Standard (K{fee_per_tonne}/tonne)"
+
+
 # Calculate net weights for entry-exit pairs
+def find_open_sessions(df, max_hours=2):
+    """
+    Find sessions that are open for more than max_hours
+    Returns sessions that have entry but no exit after the time limit
+    """
+    if df.empty:
+        return pd.DataFrame()
+    
+    try:
+        current_time = datetime.now()
+        
+        # Group by session_id
+        sessions = df.groupby('session_id')
+        open_sessions = []
+        
+        for session_id, group in sessions:
+            # Check if session has both entry and exit
+            if 'event_type_std' in group.columns:
+                entry = group[group['event_type_std'] == 1]
+                exit = group[group['event_type_std'] == 2]
+            else:
+                # Handle string and numeric event types
+                if isinstance(group['event_type'].iloc[0], str):
+                    entry = group[group['event_type'] == 'ARRIVAL']
+                    exit = group[group['event_type'] == 'DEPARTURE']
+                else:
+                    entry = group[group['event_type'] == 1]
+                    exit = group[group['event_type'] == 2]
+            
+            # If has entry but no exit, check time
+            if not entry.empty and exit.empty:
+                entry_time = entry.iloc[0]['event_time']
+                # Convert to timezone-naive datetime for comparison
+                if hasattr(entry_time, 'tz_localize'):
+                    entry_time = entry_time.tz_localize(None) if entry_time.tz is not None else entry_time
+                
+                time_diff = current_time - entry_time
+                if time_diff.total_seconds() / 3600 > max_hours:
+                    open_sessions.append({
+                        'session_id': session_id,
+                        'entry_time': entry_time,
+                        'vehicle_id': entry.iloc[0]['vehicle_id'],
+                        'license_plate': entry.iloc[0].get('license_plate', 'Unknown'),
+                        'company_name': entry.iloc[0].get('company_name', 'Unknown'),
+                        'entry_weight': entry.iloc[0]['weight_kg'],
+                        'hours_open': time_diff.total_seconds() / 3600,
+                        'remarks': entry.iloc[0].get('remarks', ''),
+                        'is_recycle': 'R' in str(entry.iloc[0].get('remarks', '')).strip().upper()
+                    })
+        
+        return pd.DataFrame(open_sessions)
+        
+    except Exception as e:
+        debug_print(f"Error finding open sessions: {e}")
+        return pd.DataFrame()
+
+def estimate_tare_weight(vehicle_id, license_plate, entry_weight, historical_df, is_recycle=False):
+    """
+    Estimate tare weight for a vehicle based on historical data
+    Returns estimated tare weight and confidence level
+    """
+    try:
+        if historical_df.empty:
+            # Default estimates based on entry weight and vehicle type
+            if is_recycle:
+                # Recycle vehicles typically have lower tare weights
+                estimated_tare = max(entry_weight * 0.15, 500)  # 15% of entry weight, min 500kg
+            else:
+                # Regular waste vehicles
+                estimated_tare = max(entry_weight * 0.25, 1000)  # 25% of entry weight, min 1000kg
+            return estimated_tare, "low"
+        
+        # Look for historical data for this specific vehicle
+        vehicle_history = historical_df[
+            (historical_df['vehicle_id'] == vehicle_id) | 
+            (historical_df['license_plate'] == license_plate)
+        ]
+        
+        if not vehicle_history.empty and 'exit_weight' in vehicle_history.columns:
+            # Use average of recent exit weights
+            recent_exits = vehicle_history['exit_weight'].dropna()
+            if len(recent_exits) >= 3:
+                estimated_tare = recent_exits.tail(5).mean()  # Average of last 5 exits
+                return estimated_tare, "high"
+            elif len(recent_exits) >= 1:
+                estimated_tare = recent_exits.mean()
+                return estimated_tare, "medium"
+        
+        # Look for similar vehicles from same company
+        if 'company_name' in historical_df.columns:
+            company_name = historical_df[historical_df['vehicle_id'] == vehicle_id]['company_name'].iloc[0] if not historical_df[historical_df['vehicle_id'] == vehicle_id].empty else None
+            if company_name:
+                company_vehicles = historical_df[historical_df['company_name'] == company_name]
+                if not company_vehicles.empty and 'exit_weight' in company_vehicles.columns:
+                    company_exits = company_vehicles['exit_weight'].dropna()
+                    if len(company_exits) >= 3:
+                        estimated_tare = company_exits.mean()
+                        return estimated_tare, "medium"
+        
+        # Fall back to general estimates based on entry weight ranges
+        if entry_weight < 3000:  # Light vehicle
+            estimated_tare = max(entry_weight * 0.20, 800)
+        elif entry_weight < 8000:  # Medium vehicle
+            estimated_tare = max(entry_weight * 0.25, 1200)
+        else:  # Heavy vehicle
+            estimated_tare = max(entry_weight * 0.30, 2000)
+        
+        return estimated_tare, "low"
+        
+    except Exception as e:
+        debug_print(f"Error estimating tare weight: {e}")
+        # Emergency fallback
+        return max(entry_weight * 0.25, 1000), "low"
+
+def auto_close_sessions(weigh_df, net_weights_df, max_hours=2, persist_to_db=True):
+    """
+    Automatically close sessions that have been open for more than max_hours
+    Returns updated weigh_df with synthetic exit events and notes
+    
+    Args:
+        weigh_df: DataFrame of weigh events
+        net_weights_df: DataFrame of historical net weights for tare estimation
+        max_hours: Maximum hours before auto-closing (default: 2)
+        persist_to_db: Whether to save synthetic exits to database (default: True)
+    """
+    try:
+        open_sessions = find_open_sessions(weigh_df, max_hours)
+        
+        if open_sessions.empty:
+            debug_print("No open sessions found requiring auto-closure")
+            return weigh_df
+        
+        debug_print(f"Found {len(open_sessions)} sessions to auto-close")
+        
+        synthetic_exits = []
+        
+        for _, session in open_sessions.iterrows():
+            # Estimate tare weight
+            estimated_tare, confidence = estimate_tare_weight(
+                session['vehicle_id'],
+                session['license_plate'], 
+                session['entry_weight'],
+                net_weights_df,
+                session['is_recycle']
+            )
+            
+            # Create synthetic exit event
+            exit_time = session['entry_time'] + timedelta(hours=max_hours)
+            
+            # Determine event type format based on existing data
+            event_type_exit = 2  # Default numeric
+            if not weigh_df.empty and 'event_type' in weigh_df.columns:
+                first_event = weigh_df['event_type'].iloc[0]
+                if isinstance(first_event, str):
+                    event_type_exit = 'DEPARTURE'
+            
+            synthetic_exit = {
+                'session_id': session['session_id'],
+                'vehicle_id': session['vehicle_id'],
+                'event_type': event_type_exit,
+                'event_time': exit_time,
+                'weight_kg': float(estimated_tare),
+                'license_plate': str(session['license_plate']),
+                'company_name': str(session['company_name']),
+                'remarks': f"AUTO-CLOSED: Session open >{max_hours}h. Estimated tare (confidence: {confidence}). Original: {session['remarks']}",
+                'auto_closed': True
+            }
+            
+            # Copy other fields from the entry event if they exist in weigh_df
+            if 'company_id' in weigh_df.columns:
+                entry_data = weigh_df[weigh_df['session_id'] == session['session_id']]
+                if not entry_data.empty:
+                    for col in ['company_id', 'company_type', 'type_code', 'delivery_type']:
+                        if col in entry_data.columns:
+                            synthetic_exit[col] = entry_data.iloc[0][col]
+            
+            synthetic_exits.append(synthetic_exit)
+        
+        if synthetic_exits:
+            # Convert to DataFrame and add to weigh_df
+            synthetic_df = pd.DataFrame(synthetic_exits)
+            
+            # Add time-based columns to match existing data structure
+            synthetic_df['event_time'] = pd.to_datetime(synthetic_df['event_time'])
+            synthetic_df['date'] = synthetic_df['event_time'].dt.date
+            synthetic_df['day'] = synthetic_df['event_time'].dt.day
+            synthetic_df['month'] = synthetic_df['event_time'].dt.month
+            synthetic_df['month_name'] = synthetic_df['event_time'].dt.strftime('%B')
+            synthetic_df['year'] = synthetic_df['event_time'].dt.year
+            synthetic_df['day_of_week'] = synthetic_df['event_time'].dt.day_name()
+            synthetic_df['day_of_week_num'] = synthetic_df['event_time'].dt.dayofweek
+            synthetic_df['hour'] = synthetic_df['event_time'].dt.hour
+            synthetic_df['week'] = synthetic_df['event_time'].dt.isocalendar().week
+            
+            # Add event type mapping if needed
+            if 'event_type_std' in weigh_df.columns:
+                if isinstance(synthetic_df['event_type'].iloc[0], str):
+                    synthetic_df['event_type_std'] = synthetic_df['event_type'].map({'DEPARTURE': 2, 'ARRIVAL': 1})
+                else:
+                    synthetic_df['event_type_std'] = synthetic_df['event_type']
+            
+            # Concatenate with original data
+            updated_df = pd.concat([weigh_df, synthetic_df], ignore_index=True)
+            
+            # Optionally persist synthetic exits to database
+            if persist_to_db:
+                try:
+                    # Prepare data for database insertion (only include columns that exist in DB)
+                    db_columns = ['session_id', 'vehicle_id', 'event_type', 'event_time', 'weight_kg', 'remarks']
+                    if 'company_id' in synthetic_df.columns:
+                        db_columns.append('company_id')
+                    
+                    synthetic_db_df = synthetic_df[db_columns].copy()
+                    
+                    # Remove auto_closed column if it exists (not in original DB schema)
+                    synthetic_db_df = synthetic_db_df.drop(columns=['auto_closed'], errors='ignore')
+                    
+                    success = write_multiple_weigh_events(synthetic_db_df)
+                    if success:
+                        debug_print(f"Successfully persisted {len(synthetic_exits)} synthetic exit events to database")
+                    else:
+                        debug_print("Failed to persist synthetic exit events to database")
+                except Exception as e:
+                    debug_print(f"Error persisting synthetic exits to database: {e}")
+            
+            debug_print(f"Added {len(synthetic_exits)} synthetic exit events")
+            return updated_df
+        
+        return weigh_df
+        
+    except Exception as e:
+        debug_print(f"Error in auto_close_sessions: {e}")
+        return weigh_df
+
 def calculate_net_weights(df):
     if df.empty:
         debug_print("Empty dataframe provided to calculate_net_weights")
         # Return an empty dataframe with the expected columns
         return pd.DataFrame(columns=[
-            'session_id', 'vehicle_id', 'company_id', 'company_name', 'license_plate',
-            'entry_time', 'exit_time', 'duration_minutes', 'entry_weight', 'exit_weight',
-            'net_weight', 'is_recycle', 'delivery_type', 'date', 'day', 'month', 
-            'month_name', 'year', 'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
+            'session_id', 'vehicle_id', 'company_id', 'company_name', 'company_type',
+            'pricing_tier', 'license_plate', 'entry_time', 'exit_time', 'duration_minutes',
+            'entry_weight', 'exit_weight', 'net_weight', 'fee_per_tonne', 'fee_amount',
+            'is_recycle', 'delivery_type', 'date', 'day', 'month', 'month_name', 'year',
+            'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
         ])
     
     try:
@@ -154,10 +471,11 @@ def calculate_net_weights(df):
             if col not in df.columns:
                 debug_print(f"Missing required column: {col}")
                 return pd.DataFrame(columns=[
-                    'session_id', 'vehicle_id', 'company_id', 'company_name', 'license_plate',
-                    'entry_time', 'exit_time', 'duration_minutes', 'entry_weight', 'exit_weight',
-                    'net_weight', 'is_recycle', 'delivery_type', 'date', 'day', 'month', 
-                    'month_name', 'year', 'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
+                    'session_id', 'vehicle_id', 'company_id', 'company_name', 'company_type',
+                    'pricing_tier', 'license_plate', 'entry_time', 'exit_time', 'duration_minutes',
+                    'entry_weight', 'exit_weight', 'net_weight', 'fee_per_tonne', 'fee_amount',
+                    'is_recycle', 'delivery_type', 'date', 'day', 'month', 'month_name', 'year',
+                    'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
                 ])
         
         # Group by session_id
@@ -200,22 +518,22 @@ def calculate_net_weights(df):
                     # Calculate net weight (always positive)
                     net_weight = abs(entry_weight - exit_weight)
                     
-                    # Get company name for fee calculation
+                    # Get company information for fee calculation
                     company_name = entry_row.get('company_name', 'Unknown')
+                    company_type = entry_row.get('type_code', None)
                     
-                    # Calculate fee: K50 per tonne only for non-LISWMC/LCC companies AND normal disposal (not recycle)
-                    fee_per_tonne = 0
-                    if company_name not in ['LISWMC', 'LCC', 'LISWMC/LCC'] and not is_recycle:
-                        fee_per_tonne = 50  # K50 per tonne for dumping waste
-                    
-                    # Calculate fee in Kwacha (convert kg to tonnes first)
-                    fee_amount = (net_weight / 1000) * fee_per_tonne
+                    # Use new tiered pricing system
+                    fee_per_tonne, fee_amount, pricing_tier = calculate_tiered_pricing(
+                        net_weight, company_type, is_recycle
+                    )
                     
                     result = {
                         'session_id': session_id,
                         'vehicle_id': entry_row['vehicle_id'],
                         'company_id': entry_row.get('company_id', 'Unknown'),
                         'company_name': company_name,
+                        'company_type': company_type,
+                        'pricing_tier': pricing_tier,
                         'license_plate': entry_row.get('license_plate', 'Unknown'),
                         'entry_time': entry_row['event_time'],
                         'exit_time': exit_row['event_time'],
@@ -248,10 +566,11 @@ def calculate_net_weights(df):
             
         debug_print("No valid session pairs found in the data")
         return pd.DataFrame(columns=[
-            'session_id', 'vehicle_id', 'company_id', 'company_name', 'license_plate',
-            'entry_time', 'exit_time', 'duration_minutes', 'entry_weight', 'exit_weight',
-            'net_weight', 'is_recycle', 'delivery_type', 'date', 'day', 'month', 
-            'month_name', 'year', 'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
+            'session_id', 'vehicle_id', 'company_id', 'company_name', 'company_type',
+            'pricing_tier', 'license_plate', 'entry_time', 'exit_time', 'duration_minutes',
+            'entry_weight', 'exit_weight', 'net_weight', 'fee_per_tonne', 'fee_amount',
+            'is_recycle', 'delivery_type', 'date', 'day', 'month', 'month_name', 'year',
+            'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
         ])
         
     except Exception as e:
@@ -259,10 +578,11 @@ def calculate_net_weights(df):
         debug_print(f"Error in calculate_net_weights: {e}")
         debug_print(traceback.format_exc())
         return pd.DataFrame(columns=[
-            'session_id', 'vehicle_id', 'company_id', 'company_name', 'license_plate',
-            'entry_time', 'exit_time', 'duration_minutes', 'entry_weight', 'exit_weight',
-            'net_weight', 'is_recycle', 'delivery_type', 'date', 'day', 'month', 
-            'month_name', 'year', 'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
+            'session_id', 'vehicle_id', 'company_id', 'company_name', 'company_type',
+            'pricing_tier', 'license_plate', 'entry_time', 'exit_time', 'duration_minutes',
+            'entry_weight', 'exit_weight', 'net_weight', 'fee_per_tonne', 'fee_amount',
+            'is_recycle', 'delivery_type', 'date', 'day', 'month', 'month_name', 'year',
+            'day_of_week', 'day_of_week_num', 'hour', 'week', 'location'
         ])
 
 # Create a Dash app
@@ -408,6 +728,7 @@ else:
 
 # Add database polling interval (refresh every 5 minutes)
 DATABASE_POLL_INTERVAL = 300  # seconds (5 minutes)
+AUTO_REFRESH_ENABLED = True  # Global toggle for auto-refresh
 
 # App layout with Tailwind CSS styling
 app.layout = html.Div([
@@ -516,7 +837,19 @@ app.layout = html.Div([
                         "Refresh Data", 
                         id='refresh-filters', 
                         className="w-full px-4 py-2 bg-green-500 text-white font-medium rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-400"
-                    )
+                    ),
+                    
+                    # Auto-refresh toggle
+                    html.Div([
+                        html.Label([
+                            dcc.Checklist(
+                                id='auto-refresh-toggle',
+                                options=[{'label': ' Auto-refresh (5 min)', 'value': 'enabled'}],
+                                value=['enabled'],
+                                className="text-sm text-gray-600"
+                            )
+                        ])
+                    ], className="mt-3")
                 ], className="mt-6"),
                 
                 # Data info
@@ -591,7 +924,18 @@ app.layout = html.Div([
     ], className="fixed bottom-2 right-2"),
     
     # Hidden div to store filtered data
-    dcc.Store(id='filtered-data'),
+    dcc.Store(id='filtered-data', data=json.dumps({'session_ids': []})),
+    
+    # Hidden store to maintain current filter state
+    dcc.Store(id='filter-state', data=json.dumps({
+        'start_date': None,
+        'end_date': None,
+        'delivery_type': None,
+        'selected_companies': [],
+        'selected_vehicles': [],
+        'selected_locations': [],
+        'filters_applied': False
+    })),
 ])
 
 # Populate filter dropdowns with cascading filters
@@ -825,7 +1169,8 @@ def populate_filter_options(start_date, end_date, delivery_type,
 
 # Filter data based on selected criteria
 @app.callback(
-    Output('filtered-data', 'data', allow_duplicate=True),
+    [Output('filtered-data', 'data', allow_duplicate=True),
+     Output('filter-state', 'data', allow_duplicate=True)],
     [Input('apply-filters', 'n_clicks'),
      Input('date-range', 'start_date'),
      Input('date-range', 'end_date')],
@@ -838,6 +1183,18 @@ def populate_filter_options(start_date, end_date, delivery_type,
 )
 def filter_data(n_clicks, start_date, end_date, delivery_type, selected_companies, selected_vehicles, selected_locations):
     debug_print(f"Filter function triggered - date range: {start_date} to {end_date}")
+    
+    # Save current filter state
+    filter_state = {
+        'start_date': start_date,
+        'end_date': end_date,
+        'delivery_type': delivery_type,
+        'selected_companies': selected_companies or [],
+        'selected_vehicles': selected_vehicles or [],
+        'selected_locations': selected_locations or [],
+        'filters_applied': True
+    }
+    
     try:
         # Use a fresh copy for filtering
         filtered_df = net_weights_df.copy()
@@ -862,7 +1219,7 @@ def filter_data(n_clicks, start_date, end_date, delivery_type, selected_companie
         if filtered_df.empty:
             # Return empty dataframe if no data
             debug_print("Empty dataframe, no filtering to do")
-            return json.dumps({'empty': True})
+            return json.dumps({'empty': True}), json.dumps(filter_state)
         
         # Apply date filter
         if start_date and end_date:
@@ -1036,7 +1393,7 @@ def filter_data(n_clicks, start_date, end_date, delivery_type, selected_companie
             # If still empty, return empty result
             if filtered_df.empty:
                 debug_print("No records match the filters after fallback attempt")
-                return json.dumps({'empty': True})
+                return json.dumps({'empty': True}), json.dumps(filter_state)
         
         # Extract just the session IDs which is enough to identify the filtered rows
         # Convert any UUIDs to strings for JSON serialization
@@ -1048,14 +1405,17 @@ def filter_data(n_clicks, start_date, end_date, delivery_type, selected_companie
                 session_ids.append(str(sid))  # Convert everything to string to be safe
         
         debug_print(f"Final filtered result: {len(session_ids)} records")
-        return json.dumps({'session_ids': session_ids})
+        return json.dumps({'session_ids': session_ids}), json.dumps(filter_state)
     
     except Exception as e:
         import traceback
         print(f"Error in filter_data: {e}")
         print(traceback.format_exc())
         # Return the original data if there's an error
-        return net_weights_df.to_json(date_format='iso', orient='split')
+        # Clear filter state on error
+        error_filter_state = filter_state.copy()
+        error_filter_state['filters_applied'] = False
+        return net_weights_df.to_json(date_format='iso', orient='split'), json.dumps(error_filter_state)
 
 # Reset filters
 @app.callback(
@@ -1065,7 +1425,8 @@ def filter_data(n_clicks, start_date, end_date, delivery_type, selected_companie
      Output('company-filter', 'value'),
      Output('vehicle-filter', 'value'),
      Output('location-filter', 'value'),
-     Output('filtered-data', 'data', allow_duplicate=True)],
+     Output('filtered-data', 'data', allow_duplicate=True),
+     Output('filter-state', 'data', allow_duplicate=True)],
     [Input('reset-filters', 'n_clicks')],
     prevent_initial_call=True
 )
@@ -1083,8 +1444,19 @@ def reset_filters(n_clicks):
     else:
         filtered_data = json.dumps({'empty': True})
     
+    # Clear filter state
+    clear_filter_state = json.dumps({
+        'start_date': None,
+        'end_date': None,
+        'delivery_type': None,
+        'selected_companies': [],
+        'selected_vehicles': [],
+        'selected_locations': [],
+        'filters_applied': False
+    })
+    
     return (datetime.now() - timedelta(days=30), datetime.now(), 
-            'all', [], [], [], filtered_data)
+            'all', [], [], [], filtered_data, clear_filter_state)
 
 # Update data info
 @app.callback(
@@ -1159,7 +1531,11 @@ def update_data_info(json_data, n_intervals):
         fee_companies = 0
         if 'fee_amount' in filtered_df.columns:
             total_fees = filtered_df['fee_amount'].sum()
-            fee_companies = filtered_df[filtered_df['fee_amount'] > 0]['company_name'].nunique()
+            # Ensure company_name is properly formatted before counting unique values
+            fee_companies_series = filtered_df[filtered_df['fee_amount'] > 0]['company_name']
+            # Convert any Series objects to strings to make them hashable
+            fee_companies_series = fee_companies_series.astype(str)
+            fee_companies = fee_companies_series.nunique()
         
         # Format date ranges if available
         date_range_text = "N/A"
@@ -2158,52 +2534,204 @@ def export_data(n_clicks, json_data):
 # Add callback for data refresh
 @app.callback(
     [Output('last-refresh-time', 'children'),
-     Output('dummy-refresh-output', 'children'),
-     Output('filtered-data', 'data', allow_duplicate=True)],
+     Output('dummy-refresh-output', 'children')],
     [Input('database-poll-interval', 'n_intervals'),
      Input('refresh-filters', 'n_clicks')],
-    prevent_initial_call='initial_duplicate',
+    [State('auto-refresh-toggle', 'value')],
+    prevent_initial_call=True,
     suppress_callback_exceptions=True
 )
-def refresh_dashboard_data(n_intervals, n_clicks):
-    """Refresh data from database periodically and update filtered data"""
-    if n_intervals or n_clicks:
-        debug_print(f"Refreshing data (interval: {n_intervals}, clicks: {n_clicks})")
+def refresh_dashboard_data(n_intervals, n_clicks, auto_refresh_enabled):
+    """Refresh data from database periodically or on manual request"""
+    ctx = dash.callback_context
+    
+    # Check what triggered the callback
+    if not ctx.triggered:
+        return [f"Last refreshed: {last_refresh_time}", ""]
+    
+    trigger = ctx.triggered[0]['prop_id']
+    
+    # Handle manual refresh button
+    if 'refresh-filters' in trigger and n_clicks:
+        debug_print("Manual refresh triggered")
         refresh_success = refresh_data_from_database()
+        if refresh_success:
+            return [f"Last refreshed: {last_refresh_time}", ""]
+        else:
+            return [f"Last refresh attempt failed at {datetime.now().strftime('%H:%M:%S')}", ""]
+    
+    # Handle automatic refresh interval
+    if 'database-poll-interval' in trigger and n_intervals:
+        # Only auto-refresh if enabled
+        if auto_refresh_enabled and 'enabled' in auto_refresh_enabled:
+            debug_print(f"Auto-refresh triggered (interval: {n_intervals})")
+            refresh_success = refresh_data_from_database()
+            if refresh_success:
+                return [f"Last refreshed: {last_refresh_time} (auto)", ""]
+            else:
+                return [f"Auto-refresh failed at {datetime.now().strftime('%H:%M:%S')}", ""]
+        else:
+            # Auto-refresh is disabled, just update the timestamp
+            return [f"🔒 Auto-refresh disabled - Last manual refresh: {last_refresh_time}", ""]
+    
+    # Default return
+    return [f"Last refreshed: {last_refresh_time}", ""]
+
+# Auto-reapply filters after data refresh
+@app.callback(
+    Output('filtered-data', 'data', allow_duplicate=True),
+    [Input('dummy-refresh-output', 'children')],
+    [State('filter-state', 'data')],
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def reapply_filters_after_refresh(refresh_signal, filter_state_json):
+    """Automatically reapply active filters when data is refreshed"""
+    try:
+        if not filter_state_json:
+            # No stored filter state, return all data
+            if not net_weights_df.empty:
+                session_ids = []
+                for sid in net_weights_df['session_id']:
+                    if hasattr(sid, 'hex'):
+                        session_ids.append(str(sid))
+                    else:
+                        session_ids.append(str(sid))
+                return json.dumps({'session_ids': session_ids})
+            else:
+                return json.dumps({'empty': True})
         
-        # Create json data with session_ids for filtering
+        filter_state = json.loads(filter_state_json)
+        
+        # Check if filters are currently applied
+        if not filter_state.get('filters_applied', False):
+            # No active filters, return all data
+            if not net_weights_df.empty:
+                session_ids = []
+                for sid in net_weights_df['session_id']:
+                    if hasattr(sid, 'hex'):
+                        session_ids.append(str(sid))
+                    else:
+                        session_ids.append(str(sid))
+                return json.dumps({'session_ids': session_ids})
+            else:
+                return json.dumps({'empty': True})
+        
+        debug_print("Reapplying filters to refreshed data...")
+        
+        # Reapply the stored filters to fresh data
+        filtered_df = net_weights_df.copy()
+        
+        # Extract filter parameters
+        start_date = filter_state.get('start_date')
+        end_date = filter_state.get('end_date')
+        delivery_type = filter_state.get('delivery_type')
+        selected_companies = filter_state.get('selected_companies', [])
+        selected_vehicles = filter_state.get('selected_vehicles', [])
+        selected_locations = filter_state.get('selected_locations', [])
+        
+        debug_print(f"Reapplying filters: date={start_date}-{end_date}, type={delivery_type}, companies={len(selected_companies)}, vehicles={len(selected_vehicles)}, locations={len(selected_locations)}")
+        
+        if filtered_df.empty:
+            return json.dumps({'empty': True})
+        
+        # Apply date filter
+        if start_date and end_date:
+            try:
+                start_date = pd.to_datetime(start_date)
+                end_date = pd.to_datetime(end_date) + timedelta(days=1)
+                
+                if 'entry_time' in filtered_df.columns:
+                    filtered_df['entry_time'] = pd.to_datetime(filtered_df['entry_time'])
+                    filtered_df = filtered_df[(filtered_df['entry_time'] >= start_date) & 
+                                             (filtered_df['entry_time'] < end_date)]
+                    debug_print(f"Date filter reapplied: {len(filtered_df)} records")
+            except Exception as e:
+                debug_print(f"Date filtering error during reapply: {e}")
+        
+        # Apply delivery type filter
+        if delivery_type and delivery_type != 'all':
+            if 'is_recycle' in filtered_df.columns:
+                before_count = len(filtered_df)
+                if delivery_type == 'normal':
+                    filtered_df = filtered_df[~filtered_df['is_recycle']]
+                elif delivery_type == 'recycle':
+                    filtered_df = filtered_df[filtered_df['is_recycle']]
+                debug_print(f"Delivery type filter reapplied: {before_count} -> {len(filtered_df)} records")
+        
+        # Apply company filter
+        if selected_companies and len(selected_companies) > 0:
+            if 'company_id' in filtered_df.columns:
+                before_count = len(filtered_df)
+                selected_company_strs = [str(c) for c in selected_companies if c is not None and c != ""]
+                filtered_df = filtered_df[filtered_df['company_id'].astype(str).isin(selected_company_strs)]
+                debug_print(f"Company filter reapplied: {before_count} -> {len(filtered_df)} records")
+        
+        # Apply vehicle filter
+        if selected_vehicles and len(selected_vehicles) > 0:
+            if 'vehicle_id' in filtered_df.columns:
+                before_count = len(filtered_df)
+                selected_vehicle_strs = [str(v) for v in selected_vehicles if v is not None and v != ""]
+                filtered_df = filtered_df[filtered_df['vehicle_id'].astype(str).isin(selected_vehicle_strs)]
+                debug_print(f"Vehicle filter reapplied: {before_count} -> {len(filtered_df)} records")
+        
+        # Apply location filter
+        if selected_locations and len(selected_locations) > 0:
+            if 'location' in filtered_df.columns:
+                before_count = len(filtered_df)
+                filtered_df = filtered_df[filtered_df['location'].isin(selected_locations)]
+                debug_print(f"Location filter reapplied: {before_count} -> {len(filtered_df)} records")
+        
+        # Return filtered session IDs
+        if filtered_df.empty:
+            debug_print("No records match the reapplied filters")
+            return json.dumps({'empty': True})
+        
+        session_ids = []
+        for sid in filtered_df['session_id']:
+            if hasattr(sid, 'hex'):
+                session_ids.append(str(sid))
+            else:
+                session_ids.append(str(sid))
+        
+        debug_print(f"Filters reapplied successfully: {len(session_ids)} records")
+        return json.dumps({'session_ids': session_ids})
+        
+    except Exception as e:
+        debug_print(f"Error in reapply_filters_after_refresh: {e}")
+        import traceback
+        debug_print(traceback.format_exc())
+        
+        # Return all data on error
         if not net_weights_df.empty:
             session_ids = []
             for sid in net_weights_df['session_id']:
-                if hasattr(sid, 'hex'):  # UUID object
+                if hasattr(sid, 'hex'):
                     session_ids.append(str(sid))
                 else:
-                    session_ids.append(str(sid))  # Convert everything to string to be safe
-                    
-            filtered_data = json.dumps({'session_ids': session_ids})
+                    session_ids.append(str(sid))
+            return json.dumps({'session_ids': session_ids})
         else:
-            filtered_data = json.dumps({'empty': True})
-            
-        if refresh_success:
-            return [f"Last refreshed: {last_refresh_time}", "", filtered_data]
-        else:
-            return [f"Last refresh attempt failed at {datetime.now().strftime('%H:%M:%S')}", "", filtered_data]
-    
-    # Default return
-    # Create json data with session_ids for filtering
+            return json.dumps({'empty': True})
+
+# Initialize filtered data on app start
+@app.callback(
+    Output('filtered-data', 'data'),
+    Input('dummy-refresh-output', 'children'),
+    prevent_initial_call=False
+)
+def initialize_filtered_data(dummy):
+    """Initialize filtered data with all session IDs on app start"""
     if not net_weights_df.empty:
         session_ids = []
         for sid in net_weights_df['session_id']:
             if hasattr(sid, 'hex'):  # UUID object
                 session_ids.append(str(sid))
             else:
-                session_ids.append(str(sid))  # Convert everything to string to be safe
-                
-        filtered_data = json.dumps({'session_ids': session_ids})
+                session_ids.append(str(sid))
+        return json.dumps({'session_ids': session_ids})
     else:
-        filtered_data = json.dumps({'empty': True})
-        
-    return [f"Last refreshed: {last_refresh_time}", "", filtered_data]
+        return json.dumps({'empty': True})
 
 # Add dummy divs for callbacks
 app.layout.children.append(html.Div(id='dummy-export-output', style={'display': 'none'}))
@@ -2211,6 +2739,12 @@ app.layout.children.append(html.Div(id='dummy-refresh-output', style={'display':
 
 # Run the app
 if __name__ == '__main__':
+    # Production vs development configuration
+    debug_mode = os.getenv('DEBUG', 'True').lower() == 'true'
+    port = int(os.getenv('PORT', 5007))
+    host = '0.0.0.0'
+    
     debug_print("Starting Database-Connected Analytics Dashboard...")
-    debug_print(f"Dashboard will be available at: http://localhost:5007/")
-    app.run(debug=True, port=5007, host='0.0.0.0')
+    debug_print(f"Dashboard will be available at: http://{host}:{port}/")
+    debug_print(f"Debug mode: {debug_mode}")
+    app.run(debug=debug_mode, port=port, host=host)

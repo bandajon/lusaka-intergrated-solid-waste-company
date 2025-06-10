@@ -683,7 +683,7 @@ def refresh_data(n_intervals, n_clicks, manual_refresh, start_date, end_date, de
     if start_date and end_date:
         start_date = pd.to_datetime(start_date)
         # Add one day to end_date to include the full end date (up to 23:59:59)
-        end_date = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
+        end_date = pd.to_datetime(end_date) + timedelta(days=1)
         
         # Debug the date filtering
         debug_print(f"Filtering dates: {start_date} to {end_date}")
@@ -693,9 +693,9 @@ def refresh_data(n_intervals, n_clicks, manual_refresh, start_date, end_date, de
         if not pd.api.types.is_datetime64_any_dtype(filtered_df['entry_time']):
             filtered_df['entry_time'] = pd.to_datetime(filtered_df['entry_time'])
             
-        # Apply the filter
+        # Apply the filter - use < for end_date since we added a day
         filtered_df = filtered_df[(filtered_df['entry_time'] >= start_date) & 
-                              (filtered_df['entry_time'] <= end_date)]
+                              (filtered_df['entry_time'] < end_date)]
         
         debug_print(f"After date filter: {len(filtered_df)} records")
     
