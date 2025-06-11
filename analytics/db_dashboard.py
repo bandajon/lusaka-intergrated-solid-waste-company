@@ -113,6 +113,12 @@ def load_data():
         weigh_df['is_recycle'] = weigh_df['remarks'].str.contains('R', case=False, na=False)
         weigh_df['delivery_type'] = weigh_df['is_recycle'].map({True: 'Recycle Collection', False: 'Normal Disposal'})
         
+        # Apply data quality corrections for misclassified recycling events
+        debug_print("Checking for misclassified recycling events...")
+        weigh_df, corrections_made = correct_misclassified_recycling_events(weigh_df, companies_df, persist_to_db=True)
+        if corrections_made:
+            debug_print(f"Applied {len(corrections_made)} data quality corrections")
+        
         # Calculate initial net weights for historical tare weight estimation
         debug_print("Calculating initial net weights for historical data...")
         initial_net_weights_df = calculate_net_weights(weigh_df)
@@ -465,6 +471,157 @@ def auto_close_sessions(weigh_df, net_weights_df, max_hours=2, persist_to_db=Tru
         debug_print(f"Error in auto_close_sessions: {e}")
         return weigh_df
 
+def correct_misclassified_recycling_events(weigh_df, companies_df, persist_to_db=True):
+    """
+    Identify and correct recycling events where exit weight < entry weight,
+    which indicates normal disposal rather than recycling.
+    
+    Args:
+        weigh_df: DataFrame with weigh events
+        companies_df: DataFrame with company information  
+        persist_to_db: Whether to save corrections to database
+    
+    Returns:
+        tuple: (corrected_df, corrections_made)
+    """
+    if weigh_df.empty:
+        return weigh_df, []
+    
+    try:
+        corrections_made = []
+        df_corrected = weigh_df.copy()
+        
+        # Get entry and exit events 
+        if 'event_type_std' in df_corrected.columns:
+            entry_events = df_corrected[df_corrected['event_type_std'] == 1]  # ARRIVAL
+            exit_events = df_corrected[df_corrected['event_type_std'] == 2]   # DEPARTURE
+        else:
+            # Fallback to original event_type column
+            entry_events = df_corrected[df_corrected['event_type'] == 1]
+            exit_events = df_corrected[df_corrected['event_type'] == 2]
+        
+        # Find recycling sessions that need correction
+        recycling_entries = entry_events[entry_events['is_recycle'] == True]
+        debug_print(f"Found {len(recycling_entries)} recycling entries to check for misclassification")
+        
+        events_to_update = []
+        
+        for _, entry in recycling_entries.iterrows():
+            session_id = entry['session_id']
+            
+            # Find corresponding exit event
+            exit_event = exit_events[exit_events['session_id'] == session_id]
+            
+            if not exit_event.empty:
+                exit_row = exit_event.iloc[0]
+                entry_weight = entry['weight_kg']
+                exit_weight = exit_row['weight_kg']
+                
+                # Check if this is actually normal disposal (exit weight < entry weight)
+                # In recycling, trucks should leave heavier than they arrived
+                if exit_weight < entry_weight:
+                    # This should be corrected to normal disposal
+                    
+                    # Get company name for location
+                    company_name = entry.get('company_name', 'Unknown Company')
+                    if pd.isna(company_name) or str(company_name).strip() in ['Unknown', 'nan']:
+                        # Try to get from companies_df if available
+                        if not companies_df.empty and 'company_id' in entry:
+                            company_info = companies_df[companies_df['company_id'] == entry['company_id']]
+                            if not company_info.empty and 'name' in company_info.columns:
+                                company_name = company_info['name'].iloc[0]
+                    
+                    # Create correction note and remove recycling marker
+                    original_remarks = entry.get('remarks', '')
+                    correction_note = f"CORRECTED: Was recycling, now normal disposal. Exit weight ({exit_weight}kg) < Entry weight ({entry_weight}kg). Original remarks: {original_remarks}"
+                    
+                    # Update the DataFrame
+                    entry_mask = df_corrected['event_id'] == entry['event_id']
+                    exit_mask = df_corrected['event_id'] == exit_row['event_id']
+                    
+                    # Update entry event
+                    df_corrected.loc[entry_mask, 'is_recycle'] = False
+                    df_corrected.loc[entry_mask, 'delivery_type'] = 'Normal Disposal' 
+                    df_corrected.loc[entry_mask, 'location'] = str(company_name)
+                    df_corrected.loc[entry_mask, 'remarks'] = correction_note
+                    
+                    # Update exit event
+                    df_corrected.loc[exit_mask, 'is_recycle'] = False
+                    df_corrected.loc[exit_mask, 'delivery_type'] = 'Normal Disposal'
+                    df_corrected.loc[exit_mask, 'location'] = str(company_name)
+                    df_corrected.loc[exit_mask, 'remarks'] = correction_note
+                    
+                    # Prepare database updates - only need event_id and new remarks
+                    events_to_update.extend([
+                        {
+                            'event_id': entry['event_id'],
+                            'remarks': correction_note
+                        },
+                        {
+                            'event_id': exit_row['event_id'],
+                            'remarks': correction_note
+                        }
+                    ])
+                    
+                    correction_info = {
+                        'session_id': session_id,
+                        'entry_weight': entry_weight,
+                        'exit_weight': exit_weight,
+                        'company_name': str(company_name),
+                        'vehicle_id': entry.get('vehicle_id', 'Unknown'),
+                        'correction_time': datetime.now(),
+                        'original_location': entry.get('location', 'N/A')
+                    }
+                    corrections_made.append(correction_info)
+        
+        # Persist corrections to database if requested
+        if persist_to_db and events_to_update:
+            try:
+                # Update existing records in database using individual UPDATE statements
+                from database_connection import get_db_engine
+                from sqlalchemy import text
+                engine = get_db_engine()
+                
+                updated_count = 0
+                with engine.connect() as conn:
+                    for event in events_to_update:
+                        # Update specific weigh event record - only update remarks field
+                        update_sql = text("""
+                        UPDATE weigh_event 
+                        SET remarks = :remarks
+                        WHERE event_id = :event_id
+                        """)
+                        
+                        result = conn.execute(update_sql, {
+                            'remarks': event['remarks'],
+                            'event_id': event['event_id']
+                        })
+                        
+                        if result.rowcount > 0:
+                            updated_count += 1
+                    
+                    conn.commit()
+                
+                debug_print(f"Successfully updated {updated_count} weigh events in database with recycling corrections")
+                    
+            except Exception as e:
+                debug_print(f"Error persisting recycling corrections to database: {e}")
+                import traceback
+                debug_print(traceback.format_exc())
+        
+        if corrections_made:
+            debug_print(f"Corrected {len(corrections_made)} misclassified recycling sessions")
+            for correction in corrections_made:
+                debug_print(f"  Session {correction['session_id']}: {correction['entry_weight']}kg → {correction['exit_weight']}kg (corrected to normal disposal)")
+        
+        return df_corrected, corrections_made
+        
+    except Exception as e:
+        debug_print(f"Error in recycling event correction: {e}")
+        import traceback
+        debug_print(traceback.format_exc())
+        return weigh_df, []
+
 def calculate_net_weights(df):
     if df.empty:
         debug_print("Empty dataframe provided to calculate_net_weights")
@@ -625,6 +782,13 @@ def refresh_data_from_database():
         merged_df, weigh_df, vehicles_df, companies_df = load_data()
         debug_print(f"Refreshed data from database:")
         debug_print(f"- {len(weigh_df)} weigh events")
+        
+        # Apply data quality corrections during refresh as well
+        if not weigh_df.empty:
+            debug_print("Applying data quality checks during refresh...")
+            weigh_df, refresh_corrections = correct_misclassified_recycling_events(weigh_df, companies_df, persist_to_db=True)
+            if refresh_corrections:
+                debug_print(f"Applied {len(refresh_corrections)} additional corrections during refresh")
         
         # Check for entry/exit events using our standardized field if available
         if 'event_type_std' in weigh_df.columns:
@@ -827,7 +991,7 @@ def create_dashboard_layout():
         html.Div([
             html.Div([
                 html.Div([
-                    html.H1("Waste Collection Analytics (DB Connected)", className="text-3xl font-bold text-gray-800"),
+                    html.H1("Waste Collection Analytics", className="text-3xl font-bold text-gray-800"),
                     html.P("LISWMC Weigh Events Dashboard", className="text-gray-600"),
                     html.P(id='last-refresh-time', className="text-sm text-gray-500 italic")
                 ], className="flex-1"),
@@ -1841,29 +2005,44 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
         if filtered_df.empty or 'net_weight' not in filtered_df.columns:
             return html.Div("No data available. Please check database connection.", className="text-gray-500 text-center py-10")
         
-        # Calculate key metrics
+        # Calculate key metrics - overall and by waste type
         total_sessions = len(filtered_df)
         total_waste = filtered_df['net_weight'].sum() / 1000  # Convert to tons
         avg_waste = filtered_df['net_weight'].mean()
         max_load = filtered_df['net_weight'].max()
         
-        # Normal vs Recycle stats
+        # Normal vs Recycle stats - detailed calculations
         normal_df = filtered_df[~filtered_df['is_recycle']] if 'is_recycle' in filtered_df.columns else filtered_df
         recycle_df = filtered_df[filtered_df['is_recycle']] if 'is_recycle' in filtered_df.columns else pd.DataFrame()
         
+        # Regular waste metrics
+        normal_sessions = len(normal_df) if not normal_df.empty else 0
         normal_total = normal_df['net_weight'].sum() / 1000 if not normal_df.empty else 0
+        normal_avg = normal_df['net_weight'].mean() if not normal_df.empty else 0
+        normal_fees = normal_df['fee_amount'].sum() if not normal_df.empty and 'fee_amount' in normal_df.columns else 0
+        
+        # Recycled waste metrics
+        recycle_sessions = len(recycle_df) if not recycle_df.empty else 0
         recycle_total = recycle_df['net_weight'].sum() / 1000 if not recycle_df.empty else 0
+        recycle_avg = recycle_df['net_weight'].mean() if not recycle_df.empty else 0
+        recycle_fees = recycle_df['fee_amount'].sum() if not recycle_df.empty and 'fee_amount' in recycle_df.columns else 0
         
         # Prepare daily trend data - convert dates to strings to avoid serialization issues
         # Create a copy with string dates
-        if 'date' in filtered_df.columns:
-            trend_df = filtered_df.copy()
-            trend_df.loc[:, 'date_str'] = trend_df['date'].astype(str)
-            daily_data = trend_df.groupby(['date_str', 'is_recycle']).agg({
-                'net_weight': 'sum',
-                'session_id': 'count'
-            }).reset_index()
-            daily_data.rename(columns={'date_str': 'date'}, inplace=True)
+        if 'date' in filtered_df.columns and not filtered_df.empty:
+            try:
+                trend_df = filtered_df.copy()
+                # Safer way to create new column - avoid potential column alignment issues
+                trend_df['date_str'] = trend_df['date'].astype(str)
+                daily_data = trend_df.groupby(['date_str', 'is_recycle']).agg({
+                    'net_weight': 'sum',
+                    'session_id': 'count'
+                }).reset_index()
+                daily_data.rename(columns={'date_str': 'date'}, inplace=True)
+            except Exception as e:
+                debug_print(f"Error creating daily trend data: {e}")
+                # Fallback to empty dataframe
+                daily_data = pd.DataFrame(columns=['date', 'is_recycle', 'net_weight', 'session_id'])
         else:
             # Create an empty dataframe with the expected columns
             daily_data = pd.DataFrame(columns=['date', 'is_recycle', 'net_weight', 'session_id'])
@@ -1936,36 +2115,52 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
         
         # Create hourly heatmap (limited to business hours 8 AM - 5 PM)
         # Filter data to only include business hours (8-17)
-        business_hours_df = filtered_df[filtered_df['hour'].between(8, 17)]
-        hour_dow = business_hours_df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
-        
-        # Custom day order
-        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        hour_dow['day_of_week'] = pd.Categorical(hour_dow['day_of_week'], categories=day_order, ordered=True)
-        hour_dow = hour_dow.sort_values(['day_of_week', 'hour'])
-        
-        # Create a pivot table for the heatmap
-        heatmap_data = hour_dow.pivot(index='day_of_week', columns='hour', values='count').fillna(0)
-        
-        # Define business hours range (8 AM to 5 PM)
-        business_hours = list(range(8, 18))  # 8-17 inclusive
-        
-        # Make sure all days are present in the pivot table
-        for day in day_order:
-            if day not in heatmap_data.index:
-                # Add missing day with zeros for business hours
-                heatmap_data.loc[day] = [0] * len(business_hours)
-        
-        # Sort the index to match day_order
-        heatmap_data = heatmap_data.reindex(day_order)
-        
-        # Make sure all business hours are present and in order
-        for hour in business_hours:
-            if hour not in heatmap_data.columns:
-                heatmap_data[hour] = 0
-        
-        # Ensure columns are properly ordered (8-18)
-        heatmap_data = heatmap_data.reindex(columns=business_hours, fill_value=0)
+        try:
+            business_hours_df = filtered_df[filtered_df['hour'].between(8, 17)] if 'hour' in filtered_df.columns else pd.DataFrame()
+            
+            if not business_hours_df.empty and 'day_of_week' in business_hours_df.columns:
+                hour_dow = business_hours_df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
+                
+                # Custom day order
+                day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                hour_dow['day_of_week'] = pd.Categorical(hour_dow['day_of_week'], categories=day_order, ordered=True)
+                hour_dow = hour_dow.sort_values(['day_of_week', 'hour'])
+                
+                # Create a pivot table for the heatmap
+                heatmap_data = hour_dow.pivot(index='day_of_week', columns='hour', values='count').fillna(0)
+            else:
+                # Create empty heatmap data if no data available
+                day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                business_hours = list(range(8, 18))
+                heatmap_data = pd.DataFrame(0, index=day_order, columns=business_hours)
+            
+            # Define business hours range (8 AM to 5 PM)
+            business_hours = list(range(8, 18))  # 8-17 inclusive
+            
+            # Make sure all days are present in the pivot table
+            for day in day_order:
+                if day not in heatmap_data.index:
+                    # Safer way to add missing day - create a Series with proper index
+                    missing_day_data = pd.Series([0] * len(business_hours), index=business_hours, name=day)
+                    heatmap_data = pd.concat([heatmap_data, missing_day_data.to_frame().T])
+            
+            # Sort the index to match day_order
+            heatmap_data = heatmap_data.reindex(day_order)
+            
+            # Make sure all business hours are present and in order
+            for hour in business_hours:
+                if hour not in heatmap_data.columns:
+                    heatmap_data[hour] = 0
+            
+            # Ensure columns are properly ordered (8-18)
+            heatmap_data = heatmap_data.reindex(columns=business_hours, fill_value=0)
+            
+        except Exception as e:
+            debug_print(f"Error creating heatmap data: {e}")
+            # Fallback to empty heatmap
+            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            business_hours = list(range(8, 18))
+            heatmap_data = pd.DataFrame(0, index=day_order, columns=business_hours)
         
         # Create the heatmap with clearly formatted hours for business hours
         hour_labels = [f"{h:02d}hrs" for h in business_hours]  # Format as 08hrs, 09hrs, etc.
@@ -2005,40 +2200,230 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
             height=250
         )
         
+        # Calculate top waste collectors by company - separate for regular and recycled waste
+        def create_company_table(data_subset, table_id, color_scheme='blue'):
+            """Create a company ranking table for a specific waste type"""
+            companies_data = []
+            if 'company_name' in data_subset.columns and not data_subset.empty:
+                try:
+                    # Create aggregation dictionary based on available columns
+                    agg_dict = {
+                        'net_weight': ['sum', 'count', 'mean'],
+                        'session_id': 'nunique'
+                    }
+                    
+                    if 'fee_amount' in data_subset.columns:
+                        agg_dict['fee_amount'] = 'sum'
+                    
+                    company_stats = data_subset.groupby('company_name').agg(agg_dict)
+                    
+                    # Flatten column names properly
+                    new_columns = []
+                    for col in company_stats.columns:
+                        if isinstance(col, tuple):
+                            if col[0] == 'net_weight':
+                                if col[1] == 'sum':
+                                    new_columns.append('total_weight')
+                                elif col[1] == 'count':
+                                    new_columns.append('total_trips')
+                                elif col[1] == 'mean':
+                                    new_columns.append('avg_weight')
+                            elif col[0] == 'session_id' and col[1] == 'nunique':
+                                new_columns.append('unique_sessions')
+                            elif col[0] == 'fee_amount' and col[1] == 'sum':
+                                new_columns.append('total_fees')
+                        else:
+                            new_columns.append(str(col))
+                    
+                    company_stats.columns = new_columns
+                    company_stats = company_stats.reset_index()
+                    
+                    # Add total_fees column if it doesn't exist
+                    if 'total_fees' not in company_stats.columns:
+                        company_stats['total_fees'] = 0
+                    
+                    # Round numeric columns
+                    numeric_cols = ['total_weight', 'avg_weight', 'total_fees']
+                    for col in numeric_cols:
+                        if col in company_stats.columns:
+                            company_stats[col] = company_stats[col].round(2)
+                    
+                    # Convert weight to tons and sort by total weight
+                    company_stats['total_weight_tons'] = (company_stats['total_weight'] / 1000).round(2)
+                    company_stats = company_stats.sort_values('total_weight_tons', ascending=False)
+                    
+                    # Get top 10 companies
+                    top_companies = company_stats.head(10)
+                    
+                    # Create data for the table
+                    for idx, row in top_companies.iterrows():
+                        rank = len(companies_data) + 1
+                        company_data = {
+                            'rank': rank,
+                            'company_name': row['company_name'],
+                            'total_weight_tons': f"{row['total_weight_tons']:,.2f}",
+                            'total_trips': int(row['total_trips']),
+                            'avg_weight_kg': f"{row['avg_weight']:,.1f}",
+                            'total_fees': f"K {row['total_fees']:,.2f}" if 'fee_amount' in data_subset.columns and row['total_fees'] > 0 else "-"
+                        }
+                        companies_data.append(company_data)
+                        
+                except Exception as e:
+                    debug_print(f"Error calculating companies for {table_id}: {e}")
+                    companies_data = []
+            
+            # Set colors based on waste type
+            if color_scheme == 'green':  # Recycled waste
+                weight_color = '#059669'  # Green
+            else:  # Regular waste
+                weight_color = '#1e40af'  # Blue
+            
+            if companies_data:
+                return dash_table.DataTable(
+                    id=table_id,
+                    columns=[
+                        {'name': 'Rank', 'id': 'rank', 'type': 'numeric'},
+                        {'name': 'Company Name', 'id': 'company_name'},
+                        {'name': 'Total Waste (tons)', 'id': 'total_weight_tons', 'type': 'numeric'},
+                        {'name': 'Total Trips', 'id': 'total_trips', 'type': 'numeric'},
+                        {'name': 'Avg Load (kg)', 'id': 'avg_weight_kg'},
+                        {'name': 'Total Fees', 'id': 'total_fees'}
+                    ],
+                    data=companies_data,
+                    style_table={'overflowX': 'auto'},
+                    style_cell={
+                        'textAlign': 'left',
+                        'padding': '12px',
+                        'fontSize': '14px',
+                        'fontFamily': 'Arial, sans-serif'
+                    },
+                    style_header={
+                        'backgroundColor': '#f8f9fa',
+                        'fontWeight': 'bold',
+                        'borderBottom': '2px solid #dee2e6',
+                        'textAlign': 'center'
+                    },
+                    style_data_conditional=[
+                        {
+                            'if': {'row_index': 'odd'},
+                            'backgroundColor': '#f1f5f9'
+                        },
+                        {
+                            'if': {'column_id': 'rank'},
+                            'textAlign': 'center',
+                            'fontWeight': 'bold'
+                        },
+                        {
+                            'if': {'column_id': 'total_weight_tons'},
+                            'textAlign': 'right',
+                            'fontWeight': 'bold',
+                            'color': weight_color
+                        },
+                        {
+                            'if': {'column_id': 'total_trips'},
+                            'textAlign': 'center'
+                        },
+                        {
+                            'if': {'column_id': 'avg_weight_kg'},
+                            'textAlign': 'right'
+                        },
+                        {
+                            'if': {'column_id': 'total_fees'},
+                            'textAlign': 'right',
+                            'color': '#dc2626'
+                        }
+                    ],
+                    page_size=10,
+                    sort_action='native'
+                )
+            else:
+                return html.Div(
+                    "No company data available for this waste type",
+                    className="text-gray-500 text-center py-8"
+                )
+        
+        # Create separate datasets for regular and recycled waste
+        if 'is_recycle' in filtered_df.columns and not filtered_df.empty:
+            regular_waste_df = filtered_df[~filtered_df['is_recycle']]
+            recycled_waste_df = filtered_df[filtered_df['is_recycle']]
+        else:
+            regular_waste_df = filtered_df.copy()  # All data as regular if no recycle column
+            recycled_waste_df = pd.DataFrame()   # Empty recycled dataset
+        
+        # Create both tables
+        regular_waste_table = create_company_table(regular_waste_df, 'top-companies-regular', 'blue')
+        recycled_waste_table = create_company_table(recycled_waste_df, 'top-companies-recycled', 'green')
+        
         # Create the overview layout
         return html.Div([
-            # Key metrics row
+            # Enhanced Key metrics - Regular and Recycled Waste
             html.Div([
+                # Regular Waste Section
                 html.Div([
-                    html.H4("Total Sessions", className="text-sm font-medium text-gray-500"),
-                    html.P(f"{total_sessions:,}", className="text-3xl font-bold text-gray-900"),
-                    html.P("weighing events", className="text-xs text-gray-500")
-                ], className="bg-white rounded-lg p-5 shadow-sm border border-gray-100"),
+                    html.Div([
+                        html.H3("🗑️ Regular Waste Disposal", className="text-lg font-medium text-blue-700 mb-3 flex items-center"),
+                        html.Div([
+                            html.Div([
+                                html.H4("Sessions", className="text-sm font-medium text-gray-600"),
+                                html.P(f"{normal_sessions:,}", className="text-2xl font-bold text-blue-600"),
+                                html.P("disposal events", className="text-xs text-gray-500")
+                            ], className="text-center"),
+                            
+                            html.Div([
+                                html.H4("Total Weight", className="text-sm font-medium text-gray-600"),
+                                html.P(f"{normal_total:,.2f}", className="text-2xl font-bold text-blue-600"),
+                                html.P("metric tons", className="text-xs text-gray-500")
+                            ], className="text-center"),
+                            
+                            html.Div([
+                                html.H4("Avg Load", className="text-sm font-medium text-gray-600"),
+                                html.P(f"{normal_avg:,.1f}", className="text-2xl font-bold text-blue-600"),
+                                html.P("kg per session", className="text-xs text-gray-500")
+                            ], className="text-center"),
+                            
+                            html.Div([
+                                html.H4("Fees", className="text-sm font-medium text-gray-600"),
+                                html.P(f"K {normal_fees:,.2f}", className="text-3xl font-extrabold text-blue-600"),
+                                html.P("charges collected", className="text-xs text-gray-500")
+                            ], className="text-center") if 'fee_amount' in filtered_df.columns else html.Div()
+                            
+                        ], className="grid grid-cols-2 md:grid-cols-4 gap-4")
+                    ], className="bg-blue-50 rounded-lg p-5 shadow-sm border border-blue-200")
+                ], className="mb-4"),
                 
+                # Recycled Waste Section  
                 html.Div([
-                    html.H4("Total Waste", className="text-sm font-medium text-gray-500"),
-                    html.P(f"{total_waste:,.2f}", className="text-3xl font-bold text-blue-600"),
-                    html.P("metric tons", className="text-xs text-gray-500")
-                ], className="bg-white rounded-lg p-5 shadow-sm border border-gray-100"),
-                
-                html.Div([
-                    html.H4("Average Load", className="text-sm font-medium text-gray-500"),
-                    html.P(f"{avg_waste:,.2f}", className="text-3xl font-bold text-gray-900"),
-                    html.P("kg per session", className="text-xs text-gray-500")
-                ], className="bg-white rounded-lg p-5 shadow-sm border border-gray-100"),
-                
-                # Show total fees or normal/recycle ratio based on whether fees exist
-                html.Div([
-                    html.H4("Total Fees", className="text-sm font-medium text-gray-500"),
-                    html.P(f"K {filtered_df['fee_amount'].sum():,.2f}", className="text-3xl font-bold text-red-600"),
-                    html.P("non-LISWMC companies", className="text-xs text-gray-500")
-                ], className="bg-white rounded-lg p-5 shadow-sm border border-gray-100") if 'fee_amount' in filtered_df.columns else
-                html.Div([
-                    html.H4("Normal / Recycle", className="text-sm font-medium text-gray-500"),
-                    html.P(f"{normal_total:,.2f} / {recycle_total:,.2f}", className="text-2xl font-bold text-gray-900"),
-                    html.P("metric tons", className="text-xs text-gray-500")
-                ], className="bg-white rounded-lg p-5 shadow-sm border border-gray-100")
-            ], className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"),
+                    html.Div([
+                        html.H3("♻️ Recycled Waste Collection", className="text-lg font-medium text-green-700 mb-3 flex items-center"),
+                        html.Div([
+                            html.Div([
+                                html.H4("Sessions", className="text-sm font-medium text-gray-600"),
+                                html.P(f"{recycle_sessions:,}", className="text-2xl font-bold text-green-600"),
+                                html.P("recycling events", className="text-xs text-gray-500")
+                            ], className="text-center"),
+                            
+                            html.Div([
+                                html.H4("Total Weight", className="text-sm font-medium text-gray-600"),
+                                html.P(f"{recycle_total:,.2f}", className="text-2xl font-bold text-green-600"),
+                                html.P("metric tons", className="text-xs text-gray-500")
+                            ], className="text-center"),
+                            
+                            html.Div([
+                                html.H4("Avg Load", className="text-sm font-medium text-gray-600"),
+                                html.P(f"{recycle_avg:,.1f}", className="text-2xl font-bold text-green-600"),
+                                html.P("kg per session", className="text-xs text-gray-500")
+                            ], className="text-center"),
+                            
+                            html.Div([
+                                html.H4("Fees", className="text-sm font-medium text-gray-600"),
+                                html.P(f"K {recycle_fees:,.2f}", className="text-3xl font-extrabold text-green-600"),
+                                html.P("charges collected", className="text-xs text-gray-500")
+                            ], className="text-center") if 'fee_amount' in filtered_df.columns else html.Div()
+                            
+                        ], className="grid grid-cols-2 md:grid-cols-4 gap-4")
+                    ], className="bg-green-50 rounded-lg p-5 shadow-sm border border-green-200")
+                ], className="mb-6")
+            ], className="mb-6"),
             
             # Charts
             html.Div([
@@ -2062,7 +2447,37 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
                         dcc.Graph(figure=heatmap_fig, config={'displayModeBar': False})
                     ], className="bg-white rounded-lg p-5 shadow-sm border border-gray-100")
                 ], className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4")
-            ], className="")
+            ], className=""),
+            
+            # Top Waste Collectors Tables - Regular and Recycled
+            html.Div([
+                html.H3("Top Waste Collectors by Company", className="text-lg font-medium text-gray-800 mb-4"),
+                html.P("Ranking companies by total waste collected in the current filtered period", 
+                       className="text-sm text-gray-600 mb-6"),
+                
+                # Two-column layout for regular and recycled waste tables
+                html.Div([
+                    # Regular Waste Table
+                    html.Div([
+                        html.Div([
+                            html.H4("🗑️ Regular Waste Disposal", className="text-md font-semibold text-blue-700 mb-3"),
+                            html.P(f"Total: {(regular_waste_df['net_weight'].sum() / 1000):,.2f} tons from {len(regular_waste_df)} trips" if not regular_waste_df.empty else "No regular waste data", 
+                                   className="text-sm text-gray-600 mb-4")
+                        ]),
+                        regular_waste_table
+                    ], className="bg-blue-50 rounded-lg p-4 border border-blue-200"),
+                    
+                    # Recycled Waste Table  
+                    html.Div([
+                        html.Div([
+                            html.H4("♻️ Recycled Waste Collection", className="text-md font-semibold text-green-700 mb-3"),
+                            html.P(f"Total: {(recycled_waste_df['net_weight'].sum() / 1000):,.2f} tons from {len(recycled_waste_df)} trips" if not recycled_waste_df.empty else "No recycled waste data", 
+                                   className="text-sm text-gray-600 mb-4")
+                        ]),
+                        recycled_waste_table
+                    ], className="bg-green-50 rounded-lg p-4 border border-green-200")
+                ], className="grid grid-cols-1 lg:grid-cols-2 gap-6")
+            ], className="bg-white rounded-lg p-5 shadow-sm border border-gray-100 mt-6")
         ])
     except Exception as e:
         import traceback
@@ -2531,11 +2946,12 @@ def update_locations_tab(json_data, tab_value, n_intervals, n_clicks):
     [Input('filtered-data', 'data'),
      Input('tabs', 'value'),
      Input('database-poll-interval', 'n_intervals'),
-     Input('apply-filters', 'n_clicks')],
+     Input('apply-filters', 'n_clicks'),
+     Input('user-data', 'data')],
     prevent_initial_call=False,
     suppress_callback_exceptions=True
 )
-def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks):
+def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks, user_data):
     if tab_value != 'data-table':
         return []
     
@@ -2599,25 +3015,55 @@ def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks):
         if 'fee_per_tonne' in table_df.columns:
             table_df['fee_per_tonne'] = table_df['fee_per_tonne'].apply(lambda x: f"K {x}" if x > 0 else "-")
         
-        # Convert any UUID objects to strings to avoid JSON serialization issues
+        # Convert any complex data types to basic types for DataTable compatibility
         for column in table_df.columns:
+            # Convert UUIDs to strings
             if table_df[column].apply(lambda x: isinstance(x, uuid.UUID)).any():
                 debug_print(f"Converting UUIDs to strings in column: {column}")
                 table_df[column] = table_df[column].astype(str)
+            
+            # Convert any remaining complex data types to strings
+            elif table_df[column].dtype == 'object':
+                # Check if column contains non-string objects that need conversion
+                sample_vals = table_df[column].dropna().head(5)
+                if not sample_vals.empty:
+                    first_val = sample_vals.iloc[0]
+                    if not isinstance(first_val, (str, int, float, bool)):
+                        debug_print(f"Converting complex objects to strings in column: {column}")
+                        table_df[column] = table_df[column].astype(str)
+            
+            # Ensure numeric columns are proper numeric types
+            elif pd.api.types.is_numeric_dtype(table_df[column]):
+                # Replace any inf/-inf values with NaN, then fill NaN with 0
+                table_df[column] = table_df[column].replace([np.inf, -np.inf], np.nan).fillna(0)
+        
+        # Final check: ensure all values are JSON serializable
+        for column in table_df.columns:
+            table_df[column] = table_df[column].apply(
+                lambda x: str(x) if pd.isna(x) or x is None or isinstance(x, (pd.Series, list, dict)) 
+                else x
+            )
+        
+        # Check if user is admin for export functionality
+        is_admin = False
+        if user_data:
+            try:
+                user_info = json.loads(user_data) if isinstance(user_data, str) else user_data
+                is_admin = user_info.get('role', '').lower() == 'admin'
+            except:
+                is_admin = False
         
         # Create data table with enhanced features
-        table = dash_table.DataTable(
-            id='data-table',
-            columns=[{'name': col.replace('_', ' ').title(), 'id': col} for col in table_df.columns],
-            data=table_df.to_dict('records'),
-            export_format='csv',  # Enable CSV export directly from the table
-            export_headers='display',  # Use formatted headers for CSV
-            style_table={
+        table_config = {
+            'id': 'data-table',
+            'columns': [{'name': col.replace('_', ' ').title(), 'id': col} for col in table_df.columns],
+            'data': table_df.to_dict('records'),
+            'style_table': {
                 'overflowX': 'auto',
                 'height': '600px', 
                 'overflowY': 'auto'
             },
-            style_cell={
+            'style_cell': {
                 'textAlign': 'left',
                 'padding': '10px',
                 'fontSize': '14px',
@@ -2626,12 +3072,12 @@ def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks):
                 'maxWidth': '300px',     # Set maximum column width
                 'textOverflow': 'ellipsis',  # Add ellipsis for overflow
             },
-            style_header={
+            'style_header': {
                 'backgroundColor': '#f8f9fa',
                 'fontWeight': 'bold',
                 'borderBottom': '2px solid #dee2e6'
             },
-            style_data_conditional=[
+            'style_data_conditional': [
                 {
                     'if': {'row_index': 'odd'},
                     'backgroundColor': '#f1f5f9'
@@ -2657,17 +3103,30 @@ def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks):
                     'color': '#1e40af'
                 }
             ],
-            page_size=25,
-            filter_action='native',  # Enable filtering
-            sort_action='native'     # Enable sorting
-        )
+            'page_size': 25,
+            'filter_action': 'native',  # Enable filtering
+            'sort_action': 'native'     # Enable sorting
+        }
         
-        # Create dedicated download button for full dataset
-        download_button = html.Button(
-            "Export Full Data to CSV", 
-            id='export-button', 
-            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mt-4"
-        )
+        # Only add export functionality for admin users
+        if is_admin:
+            table_config['export_format'] = 'csv'  # Enable CSV export directly from the table
+            table_config['export_headers'] = 'display'  # Use formatted headers for CSV
+        
+        table = dash_table.DataTable(**table_config)
+        
+        # Create dedicated download button for full dataset (admin only)
+        if is_admin:
+            download_button = html.Button(
+                "Export Full Data to CSV", 
+                id='export-button', 
+                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mt-4"
+            )
+        else:
+            download_button = html.Div([
+                html.Span("CSV Export", className="text-gray-400 text-sm"),
+                html.Span(" (Admin Only)", className="text-gray-500 text-xs ml-1")
+            ], className="px-4 py-2 bg-gray-100 text-gray-400 text-sm font-medium rounded-md mt-4 cursor-not-allowed")
         
         return html.Div([
             html.Div([
@@ -2696,12 +3155,30 @@ def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks):
     Output('dummy-export-output', 'children', allow_duplicate=True),
     Input('export-button', 'n_clicks'),
     State('filtered-data', 'data'),
+    State('user-data', 'data'),
     prevent_initial_call=True,
     suppress_callback_exceptions=True
 )
-def export_data(n_clicks, json_data):
+def export_data(n_clicks, json_data, user_data):
     if not n_clicks:
         return None
+    
+    # Check if user is admin
+    is_admin = False
+    if user_data:
+        try:
+            user_info = json.loads(user_data) if isinstance(user_data, str) else user_data
+            is_admin = user_info.get('role', '').lower() == 'admin'
+        except:
+            is_admin = False
+    
+    if not is_admin:
+        return html.Div([
+            html.P("Access Denied: CSV export is restricted to administrators only.", 
+                   className="text-red-600 mt-2 font-medium"),
+            html.P("Please contact your system administrator for data export requests.", 
+                   className="text-sm text-gray-600")
+        ])
     
     try:
         debug_print(f"Exporting data to CSV from button click: {n_clicks}")
