@@ -1,6 +1,7 @@
 import pandas as pd
 import logging
 import os
+import psycopg2
 from sqlalchemy import create_engine, text
 
 # Configure logging
@@ -26,6 +27,15 @@ TABLES = {
 def get_connection_string():
     """Get SQLAlchemy connection string"""
     return f"postgresql://{DB_PARAMS['user']}:{DB_PARAMS['password']}@{DB_PARAMS['host']}:{DB_PARAMS['port']}/{DB_PARAMS['database']}"
+
+def get_db_connection():
+    """Get raw psycopg2 connection for transaction management"""
+    try:
+        conn = psycopg2.connect(**DB_PARAMS)
+        return conn
+    except Exception as e:
+        logger.error(f"Error creating database connection: {e}")
+        return None
 
 def get_db_engine():
     """Get SQLAlchemy engine for database operations"""

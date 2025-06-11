@@ -21,6 +21,12 @@ import plotly.graph_objects as go
 # Import database connection module
 from database_connection import read_companies, read_vehicles, read_weigh_events, check_connection, write_multiple_weigh_events
 
+# Import authentication module
+try:
+    from analytics.auth import AuthManager
+except ImportError:
+    from auth import AuthManager
+
 # Enable debug mode for console output
 DEBUG = True
 
@@ -71,16 +77,19 @@ def load_data():
         # Convert event_time to datetime and strip timezone to avoid filtering issues
         weigh_df['event_time'] = pd.to_datetime(weigh_df['event_time']).dt.tz_localize(None)
         
-        # Extract date components
-        weigh_df['date'] = weigh_df['event_time'].dt.date
-        weigh_df['day'] = weigh_df['event_time'].dt.day
-        weigh_df['month'] = weigh_df['event_time'].dt.month
-        weigh_df['month_name'] = weigh_df['event_time'].dt.strftime('%B')
-        weigh_df['year'] = weigh_df['event_time'].dt.year
-        weigh_df['day_of_week'] = weigh_df['event_time'].dt.day_name()
-        weigh_df['day_of_week_num'] = weigh_df['event_time'].dt.dayofweek
-        weigh_df['hour'] = weigh_df['event_time'].dt.hour
-        weigh_df['week'] = weigh_df['event_time'].dt.isocalendar().week
+        # Convert from GMT to Zambia time (GMT+2)
+        weigh_df['event_time_local'] = weigh_df['event_time'] + timedelta(hours=2)
+        
+        # Extract date components using local time
+        weigh_df['date'] = weigh_df['event_time_local'].dt.date
+        weigh_df['day'] = weigh_df['event_time_local'].dt.day
+        weigh_df['month'] = weigh_df['event_time_local'].dt.month
+        weigh_df['month_name'] = weigh_df['event_time_local'].dt.strftime('%B')
+        weigh_df['year'] = weigh_df['event_time_local'].dt.year
+        weigh_df['day_of_week'] = weigh_df['event_time_local'].dt.day_name()
+        weigh_df['day_of_week_num'] = weigh_df['event_time_local'].dt.dayofweek
+        weigh_df['hour'] = weigh_df['event_time_local'].dt.hour
+        weigh_df['week'] = weigh_df['event_time_local'].dt.isocalendar().week
         
         # Map event types - handles both numeric types (1,2) and string types ('ARRIVAL','DEPARTURE')
         if 'event_type' in weigh_df.columns:
@@ -114,15 +123,17 @@ def load_data():
         
         # Recalculate date components for any new synthetic exit events
         weigh_df['event_time'] = pd.to_datetime(weigh_df['event_time']).dt.tz_localize(None)
-        weigh_df['date'] = weigh_df['event_time'].dt.date
-        weigh_df['day'] = weigh_df['event_time'].dt.day
-        weigh_df['month'] = weigh_df['event_time'].dt.month
-        weigh_df['month_name'] = weigh_df['event_time'].dt.strftime('%B')
-        weigh_df['year'] = weigh_df['event_time'].dt.year
-        weigh_df['day_of_week'] = weigh_df['event_time'].dt.day_name()
-        weigh_df['day_of_week_num'] = weigh_df['event_time'].dt.dayofweek
-        weigh_df['hour'] = weigh_df['event_time'].dt.hour
-        weigh_df['week'] = weigh_df['event_time'].dt.isocalendar().week
+        # Convert from GMT to Zambia time (GMT+2)
+        weigh_df['event_time_local'] = weigh_df['event_time'] + timedelta(hours=2)
+        weigh_df['date'] = weigh_df['event_time_local'].dt.date
+        weigh_df['day'] = weigh_df['event_time_local'].dt.day
+        weigh_df['month'] = weigh_df['event_time_local'].dt.month
+        weigh_df['month_name'] = weigh_df['event_time_local'].dt.strftime('%B')
+        weigh_df['year'] = weigh_df['event_time_local'].dt.year
+        weigh_df['day_of_week'] = weigh_df['event_time_local'].dt.day_name()
+        weigh_df['day_of_week_num'] = weigh_df['event_time_local'].dt.dayofweek
+        weigh_df['hour'] = weigh_df['event_time_local'].dt.hour
+        weigh_df['week'] = weigh_df['event_time_local'].dt.isocalendar().week
         
         # Merge with vehicle and company data
         try:
@@ -402,15 +413,17 @@ def auto_close_sessions(weigh_df, net_weights_df, max_hours=2, persist_to_db=Tru
             
             # Add time-based columns to match existing data structure
             synthetic_df['event_time'] = pd.to_datetime(synthetic_df['event_time'])
-            synthetic_df['date'] = synthetic_df['event_time'].dt.date
-            synthetic_df['day'] = synthetic_df['event_time'].dt.day
-            synthetic_df['month'] = synthetic_df['event_time'].dt.month
-            synthetic_df['month_name'] = synthetic_df['event_time'].dt.strftime('%B')
-            synthetic_df['year'] = synthetic_df['event_time'].dt.year
-            synthetic_df['day_of_week'] = synthetic_df['event_time'].dt.day_name()
-            synthetic_df['day_of_week_num'] = synthetic_df['event_time'].dt.dayofweek
-            synthetic_df['hour'] = synthetic_df['event_time'].dt.hour
-            synthetic_df['week'] = synthetic_df['event_time'].dt.isocalendar().week
+            # Convert from GMT to Zambia time (GMT+2)
+            synthetic_df['event_time_local'] = synthetic_df['event_time'] + timedelta(hours=2)
+            synthetic_df['date'] = synthetic_df['event_time_local'].dt.date
+            synthetic_df['day'] = synthetic_df['event_time_local'].dt.day
+            synthetic_df['month'] = synthetic_df['event_time_local'].dt.month
+            synthetic_df['month_name'] = synthetic_df['event_time_local'].dt.strftime('%B')
+            synthetic_df['year'] = synthetic_df['event_time_local'].dt.year
+            synthetic_df['day_of_week'] = synthetic_df['event_time_local'].dt.day_name()
+            synthetic_df['day_of_week_num'] = synthetic_df['event_time_local'].dt.dayofweek
+            synthetic_df['hour'] = synthetic_df['event_time_local'].dt.hour
+            synthetic_df['week'] = synthetic_df['event_time_local'].dt.isocalendar().week
             
             # Add event type mapping if needed
             if 'event_type_std' in weigh_df.columns:
@@ -730,198 +743,298 @@ else:
 DATABASE_POLL_INTERVAL = 300  # seconds (5 minutes)
 AUTO_REFRESH_ENABLED = True  # Global toggle for auto-refresh
 
-# App layout with Tailwind CSS styling
-app.layout = html.Div([
-    # Header
-    html.Div([
+# Login layout
+def create_login_layout():
+    return html.Div([
         html.Div([
-            html.H1("Waste Collection Analytics (DB Connected)", className="text-3xl font-bold text-gray-800"),
-            html.P("LISWMC Weigh Events Dashboard", className="text-gray-600"),
-            html.P(id='last-refresh-time', className="text-sm text-gray-500 italic")
-        ], className="px-4 py-6 bg-white shadow-sm rounded-lg mx-auto max-w-7xl")
-    ], className="w-full bg-gray-50 border-b border-gray-200 py-4"),
-    
-    # Database polling interval - refreshes data every 30 seconds
-    dcc.Interval(
-        id='database-poll-interval',
-        interval=DATABASE_POLL_INTERVAL * 1000,  # Convert to milliseconds
-        n_intervals=0
-    ),
-    
-    # Main content
-    html.Div([
-        html.Div([
-            # Filters panel
             html.Div([
-                html.H3("Filters", className="text-lg font-medium text-gray-700 mb-4"),
-                
-                # Date range filter
+                # Logo/Header
                 html.Div([
-                    html.Label("Date Range", className="block text-sm font-medium text-gray-700 mb-1"),
-                    dcc.DatePickerRange(
-                        id='date-range',
-                        min_date_allowed=datetime(2020, 1, 1),
-                        max_date_allowed=datetime.now() + timedelta(days=1),
-                        start_date=datetime.now() - timedelta(days=30),
-                        end_date=datetime.now(),
-                        display_format='YYYY-MM-DD',
-                        updatemode='bothdates',
-                        className="w-full"
+                    html.H1("LISWMC Analytics Dashboard", className="text-4xl font-bold text-blue-600 mb-2"),
+                    html.P("Lusaka Integrated Solid Waste Management Company", className="text-lg text-gray-600 mb-6"),
+                ], className="text-center mb-8"),
+                
+                # Login Form
+                html.Div([
+                    html.H2("Login", className="text-2xl font-semibold text-gray-800 mb-6 text-center"),
+                    
+                    # Login form
+                    html.Div([
+                        html.Div([
+                            html.Label("Username", className="block text-sm font-medium text-gray-700 mb-1"),
+                            dcc.Input(
+                                id='login-username',
+                                type='text',
+                                placeholder='Enter your username',
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500",
+                                value='',
+                                persistence=False
+                            )
+                        ], className="mb-4"),
+                        
+                        html.Div([
+                            html.Label("Password", className="block text-sm font-medium text-gray-700 mb-1"),
+                            dcc.Input(
+                                id='login-password',
+                                type='password',
+                                placeholder='Enter your password',
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500",
+                                value='',
+                                persistence=False
+                            )
+                        ], className="mb-6"),
+                        
+                        html.Button(
+                            "Login",
+                            id='login-button',
+                            className="w-full px-4 py-2 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500",
+                            n_clicks=0
+                        ),
+                        
+                        html.Div(id='login-status', className="mt-4 text-center")
+                    ], className="space-y-4")
+                ], className="bg-white p-8 rounded-lg shadow-lg border border-gray-200"),
+                
+                # Instructions
+                html.Div([
+                    html.H3("Dashboard Features", className="text-xl font-semibold text-gray-800 mb-4"),
+                    html.Ul([
+                        html.Li("📊 Real-time waste collection analytics", className="flex items-center mb-2"),
+                        html.Li("📈 Daily, weekly, and monthly trends", className="flex items-center mb-2"),
+                        html.Li("🚛 Vehicle performance tracking", className="flex items-center mb-2"),
+                        html.Li("📍 Location-based insights", className="flex items-center mb-2"),
+                        html.Li("💰 Fee calculation and reporting", className="flex items-center mb-2"),
+                        html.Li("📋 Detailed data tables with export", className="flex items-center mb-2"),
+                        html.Li("🔄 Auto-refresh every 5 minutes", className="flex items-center mb-2"),
+                    ], className="text-gray-600"),
+                    
+                    html.Div([
+                        html.H4("Default Accounts", className="text-lg font-medium text-gray-700 mt-6 mb-2"),
+                        html.P("Admin: username=admin, password=admin123", className="text-sm text-gray-600 font-mono bg-gray-100 p-2 rounded"),
+                        html.P("Viewer: username=viewer, password=viewer123", className="text-sm text-gray-600 font-mono bg-gray-100 p-2 rounded mt-1"),
+                        html.P("⚠️ Please change these passwords after first login", className="text-sm text-red-600 mt-2 font-medium")
+                    ])
+                ], className="bg-white p-6 rounded-lg shadow-lg border border-gray-200 mt-6")
+                
+            ], className="max-w-md mx-auto")
+        ], className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8")
+    ])
+
+# Main dashboard layout
+def create_dashboard_layout():
+    return html.Div([
+        # Header with logout
+        html.Div([
+            html.Div([
+                html.Div([
+                    html.H1("Waste Collection Analytics (DB Connected)", className="text-3xl font-bold text-gray-800"),
+                    html.P("LISWMC Weigh Events Dashboard", className="text-gray-600"),
+                    html.P(id='last-refresh-time', className="text-sm text-gray-500 italic")
+                ], className="flex-1"),
+                
+                # User info and logout
+                html.Div([
+                    html.Div([
+                        html.Span(id='user-display', className="text-sm text-gray-600 mr-4"),
+                        html.Button(
+                            "Logout",
+                            id='logout-button',
+                            className="px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-400",
+                            n_clicks=0
+                        )
+                    ], className="flex items-center")
+                ], className="flex-shrink-0")
+            ], className="px-4 py-6 bg-white shadow-sm rounded-lg mx-auto max-w-7xl flex items-center justify-between")
+        ], className="w-full bg-gray-50 border-b border-gray-200 py-4"),
+    
+        # Database polling interval - refreshes data every 5 minutes
+        dcc.Interval(
+            id='database-poll-interval',
+            interval=DATABASE_POLL_INTERVAL * 1000,  # Convert to milliseconds
+            n_intervals=0
+        ),
+        
+        # Main content
+        html.Div([
+            html.Div([
+                # Filters panel
+                html.Div([
+                    html.H3("Filters", className="text-lg font-medium text-gray-700 mb-4"),
+                    
+                    # Date range filter
+                    html.Div([
+                        html.Label("Date Range", className="block text-sm font-medium text-gray-700 mb-1"),
+                        dcc.DatePickerRange(
+                            id='date-range',
+                            min_date_allowed=datetime(2020, 1, 1),
+                            max_date_allowed=datetime.now() + timedelta(days=1),
+                            start_date=datetime.now() - timedelta(days=30),
+                            end_date=datetime.now(),
+                            display_format='YYYY-MM-DD',
+                            updatemode='bothdates',
+                            className="w-full"
+                        )
+                    ], className="mb-4"),
+                    
+                    # Delivery type filter
+                    html.Div([
+                        html.Label("Delivery Type", className="block text-sm font-medium text-gray-700 mb-1"),
+                        dcc.Dropdown(
+                            id='delivery-type-filter',
+                            options=[
+                                {'label': 'All Types', 'value': 'all'},
+                                {'label': 'Normal Disposal', 'value': 'normal'},
+                                {'label': 'Recycle Collection', 'value': 'recycle'}
+                            ],
+                            value='all',
+                            className="w-full"
+                        )
+                    ], className="mb-4"),
+                    
+                    # Company filter
+                    html.Div([
+                        html.Label("Company", className="block text-sm font-medium text-gray-700 mb-1"),
+                        dcc.Dropdown(
+                            id='company-filter',
+                            multi=True,
+                            placeholder="Select companies...",
+                            className="w-full",
+                            style={"white-space": "nowrap", "text-overflow": "ellipsis"}
+                        )
+                    ], className="mb-4"),
+                    
+                    # Vehicle filter
+                    html.Div([
+                        html.Label("Vehicle", className="block text-sm font-medium text-gray-700 mb-1"),
+                        dcc.Dropdown(
+                            id='vehicle-filter',
+                            multi=True,
+                            placeholder="Select vehicles...",
+                            className="w-full",
+                            style={"white-space": "nowrap", "text-overflow": "ellipsis"}
+                        )
+                    ], className="mb-4"),
+                    
+                    # Location filter
+                    html.Div([
+                        html.Label("Location", className="block text-sm font-medium text-gray-700 mb-1"),
+                        dcc.Dropdown(
+                            id='location-filter',
+                            multi=True,
+                            placeholder="Select locations...",
+                            className="w-full",
+                            style={"white-space": "nowrap", "text-overflow": "ellipsis"}
+                        )
+                    ], className="mb-4"),
+                    
+                    # Filter buttons
+                    html.Div([
+                        html.Button(
+                            "Apply Filters", 
+                            id='apply-filters', 
+                            className="w-full px-4 py-2 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mb-2"
+                        ),
+                        html.Button(
+                            "Reset Filters", 
+                            id='reset-filters', 
+                            className="w-full px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 mb-2"
+                        ),
+                        html.Button(
+                            "Refresh Data", 
+                            id='refresh-filters', 
+                            className="w-full px-4 py-2 bg-green-500 text-white font-medium rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-400"
+                        ),
+                        
+                        # Auto-refresh toggle
+                        html.Div([
+                            html.Label([
+                                dcc.Checklist(
+                                    id='auto-refresh-toggle',
+                                    options=[{'label': ' Auto-refresh (5 min)', 'value': 'enabled'}],
+                                    value=['enabled'],
+                                    className="text-sm text-gray-600"
+                                )
+                            ])
+                        ], className="mt-3")
+                    ], className="mt-6"),
+                    
+                    # Data info
+                    html.Div(
+                        id='data-info', 
+                        className="mt-4 p-3 bg-gray-50 rounded-md text-sm text-gray-600"
                     )
-                ], className="mb-4"),
+                ], className="w-full lg:w-1/5 bg-white p-6 rounded-lg shadow-sm"),
                 
-                # Delivery type filter
+                # Main dashboard content
                 html.Div([
-                    html.Label("Delivery Type", className="block text-sm font-medium text-gray-700 mb-1"),
-                    dcc.Dropdown(
-                        id='delivery-type-filter',
-                        options=[
-                            {'label': 'All Types', 'value': 'all'},
-                            {'label': 'Normal Disposal', 'value': 'normal'},
-                            {'label': 'Recycle Collection', 'value': 'recycle'}
-                        ],
-                        value='all',
-                        className="w-full"
-                    )
-                ], className="mb-4"),
-                
-                # Company filter
-                html.Div([
-                    html.Label("Company", className="block text-sm font-medium text-gray-700 mb-1"),
-                    dcc.Dropdown(
-                        id='company-filter',
-                        multi=True,
-                        placeholder="Select companies...",
-                        className="w-full",
-                        style={"white-space": "nowrap", "text-overflow": "ellipsis"}
-                    )
-                ], className="mb-4"),
-                
-                # Vehicle filter
-                html.Div([
-                    html.Label("Vehicle", className="block text-sm font-medium text-gray-700 mb-1"),
-                    dcc.Dropdown(
-                        id='vehicle-filter',
-                        multi=True,
-                        placeholder="Select vehicles...",
-                        className="w-full",
-                        style={"white-space": "nowrap", "text-overflow": "ellipsis"}
-                    )
-                ], className="mb-4"),
-                
-                # Location filter
-                html.Div([
-                    html.Label("Location", className="block text-sm font-medium text-gray-700 mb-1"),
-                    dcc.Dropdown(
-                        id='location-filter',
-                        multi=True,
-                        placeholder="Select locations...",
-                        className="w-full",
-                        style={"white-space": "nowrap", "text-overflow": "ellipsis"}
-                    )
-                ], className="mb-4"),
-                
-                # Filter buttons
-                html.Div([
-                    html.Button(
-                        "Apply Filters", 
-                        id='apply-filters', 
-                        className="w-full px-4 py-2 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mb-2"
-                    ),
-                    html.Button(
-                        "Reset Filters", 
-                        id='reset-filters', 
-                        className="w-full px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 mb-2"
-                    ),
-                    html.Button(
-                        "Refresh Data", 
-                        id='refresh-filters', 
-                        className="w-full px-4 py-2 bg-green-500 text-white font-medium rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-400"
+                    dcc.Tabs(
+                        id='tabs', 
+                        value='overview',
+                        className="mb-4", 
+                        children=[
+                            dcc.Tab(
+                                label='Overview',
+                                value='overview',
+                                className="px-4 py-2 font-medium focus:outline-none",
+                                selected_className="border-b-2 border-indigo-500 text-indigo-600"
+                            ),
+                            dcc.Tab(
+                                label='Data Analysis',
+                                value='analysis',
+                                className="px-4 py-2 font-medium focus:outline-none",
+                                selected_className="border-b-2 border-indigo-500 text-indigo-600"
+                            ),
+                            dcc.Tab(
+                                label='Location Insights',
+                                value='locations',
+                                className="px-4 py-2 font-medium focus:outline-none",
+                                selected_className="border-b-2 border-indigo-500 text-indigo-600"
+                            ),
+                            dcc.Tab(
+                                label='Data Table',
+                                value='data-table',
+                                className="px-4 py-2 font-medium focus:outline-none",
+                                selected_className="border-b-2 border-indigo-500 text-indigo-600"
+                            )
+                        ]
                     ),
                     
-                    # Auto-refresh toggle
-                    html.Div([
-                        html.Label([
-                            dcc.Checklist(
-                                id='auto-refresh-toggle',
-                                options=[{'label': ' Auto-refresh (5 min)', 'value': 'enabled'}],
-                                value=['enabled'],
-                                className="text-sm text-gray-600"
-                            )
-                        ])
-                    ], className="mt-3")
-                ], className="mt-6"),
-                
-                # Data info
-                html.Div(
-                    id='data-info', 
-                    className="mt-4 p-3 bg-gray-50 rounded-md text-sm text-gray-600"
-                )
-            ], className="w-full lg:w-1/5 bg-white p-6 rounded-lg shadow-sm"),
-            
-            # Main dashboard content
-            html.Div([
-                dcc.Tabs(
-                    id='tabs', 
-                    value='overview',
-                    className="mb-4", 
-                    children=[
-                        dcc.Tab(
-                            label='Overview',
-                            value='overview',
-                            className="px-4 py-2 font-medium focus:outline-none",
-                            selected_className="border-b-2 border-indigo-500 text-indigo-600"
-                        ),
-                        dcc.Tab(
-                            label='Data Analysis',
-                            value='analysis',
-                            className="px-4 py-2 font-medium focus:outline-none",
-                            selected_className="border-b-2 border-indigo-500 text-indigo-600"
-                        ),
-                        dcc.Tab(
-                            label='Location Insights',
-                            value='locations',
-                            className="px-4 py-2 font-medium focus:outline-none",
-                            selected_className="border-b-2 border-indigo-500 text-indigo-600"
-                        ),
-                        dcc.Tab(
-                            label='Data Table',
-                            value='data-table',
-                            className="px-4 py-2 font-medium focus:outline-none",
-                            selected_className="border-b-2 border-indigo-500 text-indigo-600"
-                        )
-                    ]
-                ),
-                
-                # Overview Tab
-                html.Div(id='overview-tab-content', className="py-4"),
-                
-                # Analysis Tab
-                html.Div(id='analysis-tab-content', className="py-4"),
-                
-                # Locations Tab
-                html.Div(id='locations-tab-content', className="py-4"),
-                
-                # Data Table Tab
-                html.Div(id='data-table-tab-content', className="py-4")
-                
-            ], className="w-full lg:w-4/5 bg-white p-6 rounded-lg shadow-sm ml-0 lg:ml-4")
-        ], className="flex flex-col lg:flex-row gap-4")
-    ], className="container mx-auto px-4 py-8"),
-    
-    # Footer
-    html.Footer([
-        html.P("© 2025 Lusaka Integrated Solid Waste Management Company", 
-               className="text-center text-sm text-gray-500")
-    ], className="w-full py-4 mt-8 bg-gray-100"),
-    
-    # Database connection status indicator
-    html.Div([
-        html.Span(
-            "Connected to Database" if connection_ok else "Database Connection Failed", 
-            className=f"px-3 py-1 bg-{'green' if connection_ok else 'red'}-100 text-{'green' if connection_ok else 'red'}-800 text-xs font-medium rounded-full"
-        ),
-    ], className="fixed bottom-2 right-2"),
+                    # Overview Tab
+                    html.Div(id='overview-tab-content', className="py-4"),
+                    
+                    # Analysis Tab
+                    html.Div(id='analysis-tab-content', className="py-4"),
+                    
+                    # Locations Tab
+                    html.Div(id='locations-tab-content', className="py-4"),
+                    
+                    # Data Table Tab
+                    html.Div(id='data-table-tab-content', className="py-4")
+                    
+                ], className="w-full lg:w-4/5 bg-white p-6 rounded-lg shadow-sm ml-0 lg:ml-4")
+            ], className="flex flex-col lg:flex-row gap-4")
+        ], className="container mx-auto px-4 py-8"),
+        
+        # Footer
+        html.Footer([
+            html.P("© 2025 Lusaka Integrated Solid Waste Management Company", 
+                   className="text-center text-sm text-gray-500")
+        ], className="w-full py-4 mt-8 bg-gray-100"),
+        
+        # Database connection status indicator
+        html.Div([
+            html.Span(
+                "Connected to Database" if connection_ok else "Database Connection Failed", 
+                className=f"px-3 py-1 bg-{'green' if connection_ok else 'red'}-100 text-{'green' if connection_ok else 'red'}-800 text-xs font-medium rounded-full"
+            ),
+        ], className="fixed bottom-2 right-2"),
+    ])
+
+# Main App Layout with Authentication
+app.layout = html.Div([
+    # Session storage for authentication
+    dcc.Store(id='session-data', storage_type='session'),
+    dcc.Store(id='user-data', storage_type='session'),
     
     # Hidden div to store filtered data
     dcc.Store(id='filtered-data', data=json.dumps({'session_ids': []})),
@@ -936,7 +1049,120 @@ app.layout = html.Div([
         'selected_locations': [],
         'filters_applied': False
     })),
+    
+    # Main content - start with login layout
+    html.Div(id='main-content', children=create_login_layout()),
+    
+    # Hidden divs for callbacks
+    html.Div(id='dummy-export-output', style={'display': 'none'}),
+    html.Div(id='dummy-refresh-output', style={'display': 'none'}),
+    html.Div(id='dummy-auth-output', style={'display': 'none'}),
 ])
+
+# Login button callback - handles login attempts
+@app.callback(
+    [Output('main-content', 'children', allow_duplicate=True),
+     Output('user-data', 'data', allow_duplicate=True)],
+    [Input('login-button', 'n_clicks')],
+    [State('login-username', 'value'),
+     State('login-password', 'value')],
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def handle_login(n_clicks, username, password):
+    if n_clicks and username and password:
+        success, message, user_data = auth_manager.authenticate_user(username, password)
+        if success:
+            # Successful login
+            debug_print(f"User {username} logged in successfully")
+            return create_dashboard_layout(), user_data
+        else:
+            # Failed login - return login layout with error message
+            debug_print(f"Failed login attempt for {username}: {message}")
+            login_layout = create_login_layout()
+            # Add error message to login status
+            login_status = html.Div([
+                html.P(message, className="text-red-600 text-sm font-medium")
+            ], className="mt-2")
+            
+            # Find and update the login-status div
+            def update_login_status(component):
+                if hasattr(component, 'id') and component.id == 'login-status':
+                    return login_status
+                elif hasattr(component, 'children'):
+                    if isinstance(component.children, list):
+                        component.children = [update_login_status(child) for child in component.children]
+                    else:
+                        component.children = update_login_status(component.children)
+                return component
+            
+            updated_layout = update_login_status(login_layout)
+            return updated_layout, None
+    
+    return dash.no_update, dash.no_update
+
+# Session check callback - handles page refresh and existing sessions
+@app.callback(
+    [Output('main-content', 'children', allow_duplicate=True),
+     Output('user-data', 'data', allow_duplicate=True)],
+    [Input('session-data', 'data')],
+    [State('user-data', 'data')],
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def check_existing_session(session_data, current_user_data):
+    # Check if user is already authenticated (page refresh/returning user)
+    if current_user_data:
+        debug_print(f"User already authenticated: {current_user_data.get('username', 'Unknown')}")
+        return create_dashboard_layout(), current_user_data
+    
+    return dash.no_update, dash.no_update
+
+# Logout callback - handles logout attempts from dashboard
+@app.callback(
+    [Output('main-content', 'children', allow_duplicate=True),
+     Output('user-data', 'data', allow_duplicate=True)],
+    [Input('logout-button', 'n_clicks')],
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def handle_logout(n_clicks):
+    if n_clicks:
+        debug_print("User logged out")
+        return create_login_layout(), None
+    
+    return dash.no_update, dash.no_update
+
+# Update user display in header
+@app.callback(
+    Output('user-display', 'children'),
+    [Input('user-data', 'data')],
+    prevent_initial_call=True
+)
+def update_user_display(user_data):
+    if user_data and 'full_name' in user_data and 'role' in user_data:
+        return f"Welcome, {user_data['full_name']} ({user_data['role']})"
+    elif user_data and 'username' in user_data and 'role' in user_data:
+        return f"Welcome, {user_data['username']} ({user_data['role']})"
+    return ""
+
+# Login status update callback - only runs when login button exists
+@app.callback(
+    Output('login-status', 'children'),
+    [Input('login-button', 'n_clicks')],
+    [State('login-username', 'value'),
+     State('login-password', 'value')],
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def update_login_status(n_clicks, username, password):
+    if n_clicks and n_clicks > 0:
+        if not username or not password:
+            return html.P("Please enter both username and password", className="text-red-600 text-sm")
+        
+        # This will be handled by the main authentication callback
+        return html.P("Authenticating...", className="text-blue-600 text-sm")
+    return ""
 
 # Populate filter dropdowns with cascading filters
 @app.callback(
@@ -950,7 +1176,8 @@ app.layout = html.Div([
      Input('vehicle-filter', 'value'),
      Input('location-filter', 'value'),
      Input('database-poll-interval', 'n_intervals')],
-    prevent_initial_call=False
+    prevent_initial_call=False,
+    suppress_callback_exceptions=True
 )
 def populate_filter_options(start_date, end_date, delivery_type, 
                            selected_companies, selected_vehicles, selected_locations, 
@@ -1463,7 +1690,8 @@ def reset_filters(n_clicks):
     Output('data-info', 'children'),
     [Input('filtered-data', 'data'),
      Input('database-poll-interval', 'n_intervals')],
-    prevent_initial_call=False
+    prevent_initial_call=False,
+    suppress_callback_exceptions=True
 )
 def update_data_info(json_data, n_intervals):
     debug_print(f"Updating data info with: {json_data[:100] if json_data else 'None'}...")
@@ -1584,7 +1812,8 @@ def update_data_info(json_data, n_intervals):
      Input('tabs', 'value'),
      Input('database-poll-interval', 'n_intervals'),
      Input('apply-filters', 'n_clicks')],
-    prevent_initial_call=False
+    prevent_initial_call=False,
+    suppress_callback_exceptions=True
 )
 def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
     if tab_value != 'overview':
@@ -1705,8 +1934,10 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
             height=250
         )
         
-        # Create hourly heatmap
-        hour_dow = filtered_df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
+        # Create hourly heatmap (limited to business hours 8 AM - 5 PM)
+        # Filter data to only include business hours (8-17)
+        business_hours_df = filtered_df[filtered_df['hour'].between(8, 17)]
+        hour_dow = business_hours_df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
         
         # Custom day order
         day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -1716,31 +1947,33 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
         # Create a pivot table for the heatmap
         heatmap_data = hour_dow.pivot(index='day_of_week', columns='hour', values='count').fillna(0)
         
+        # Define business hours range (8 AM to 5 PM)
+        business_hours = list(range(8, 18))  # 8-17 inclusive
+        
         # Make sure all days are present in the pivot table
         for day in day_order:
             if day not in heatmap_data.index:
-                # Add missing day with zeros
-                heatmap_data.loc[day] = [0] * len(heatmap_data.columns) if len(heatmap_data.columns) > 0 else [0] * 24
+                # Add missing day with zeros for business hours
+                heatmap_data.loc[day] = [0] * len(business_hours)
         
         # Sort the index to match day_order
         heatmap_data = heatmap_data.reindex(day_order)
         
-        # Make sure all hours are present and in order
-        for hour in range(24):
+        # Make sure all business hours are present and in order
+        for hour in business_hours:
             if hour not in heatmap_data.columns:
                 heatmap_data[hour] = 0
         
-        # Ensure columns are properly ordered (0-23)
-        all_hours = list(range(24))
-        heatmap_data = heatmap_data.reindex(columns=all_hours, fill_value=0)
+        # Ensure columns are properly ordered (8-18)
+        heatmap_data = heatmap_data.reindex(columns=business_hours, fill_value=0)
         
-        # Create the heatmap with clearly formatted hours
-        hour_labels = [f"{h:02d}:00" for h in range(24)]  # Format as 00:00, 01:00, etc.
+        # Create the heatmap with clearly formatted hours for business hours
+        hour_labels = [f"{h:02d}hrs" for h in business_hours]  # Format as 08hrs, 09hrs, etc.
         
         heatmap_fig = px.imshow(
             heatmap_data,
             labels=dict(x='Hour of Day', y='Day of Week', color='Sessions'),
-            x=all_hours,  # Use consistent list of hours
+            x=business_hours,  # Use business hours list
             y=heatmap_data.index.tolist(),
             color_continuous_scale='Blues',
             aspect='auto'
@@ -1749,10 +1982,10 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
         heatmap_fig.update_layout(
             title=None,
             xaxis=dict(
-                title="Hour of Day",
+                title="Hour of Day (Business Hours)",
                 titlefont=dict(size=12),
                 tickmode='array',
-                tickvals=list(range(24)),
+                tickvals=business_hours,
                 ticktext=hour_labels,
                 tickangle=0,
                 tickfont=dict(size=10),
@@ -1847,7 +2080,8 @@ def update_overview_tab(json_data, tab_value, n_intervals, n_clicks):
      Input('tabs', 'value'),
      Input('database-poll-interval', 'n_intervals'),
      Input('apply-filters', 'n_clicks')],
-    prevent_initial_call=False
+    prevent_initial_call=False,
+    suppress_callback_exceptions=True
 )
 def update_analysis_tab(json_data, tab_value, n_intervals, n_clicks):
     if tab_value != 'analysis':
@@ -2129,7 +2363,8 @@ def update_analysis_tab(json_data, tab_value, n_intervals, n_clicks):
      Input('tabs', 'value'),
      Input('database-poll-interval', 'n_intervals'),
      Input('apply-filters', 'n_clicks')],
-    prevent_initial_call=False
+    prevent_initial_call=False,
+    suppress_callback_exceptions=True
 )
 def update_locations_tab(json_data, tab_value, n_intervals, n_clicks):
     if tab_value != 'locations':
@@ -2297,7 +2532,8 @@ def update_locations_tab(json_data, tab_value, n_intervals, n_clicks):
      Input('tabs', 'value'),
      Input('database-poll-interval', 'n_intervals'),
      Input('apply-filters', 'n_clicks')],
-    prevent_initial_call=False
+    prevent_initial_call=False,
+    suppress_callback_exceptions=True
 )
 def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks):
     if tab_value != 'data-table':
@@ -2718,7 +2954,8 @@ def reapply_filters_after_refresh(refresh_signal, filter_state_json):
 @app.callback(
     Output('filtered-data', 'data'),
     Input('dummy-refresh-output', 'children'),
-    prevent_initial_call=False
+    prevent_initial_call=False,
+    suppress_callback_exceptions=True
 )
 def initialize_filtered_data(dummy):
     """Initialize filtered data with all session IDs on app start"""
@@ -2733,9 +2970,8 @@ def initialize_filtered_data(dummy):
     else:
         return json.dumps({'empty': True})
 
-# Add dummy divs for callbacks
-app.layout.children.append(html.Div(id='dummy-export-output', style={'display': 'none'}))
-app.layout.children.append(html.Div(id='dummy-refresh-output', style={'display': 'none'}))
+# Initialize the auth manager instance
+auth_manager = AuthManager()
 
 # Run the app
 if __name__ == '__main__':
