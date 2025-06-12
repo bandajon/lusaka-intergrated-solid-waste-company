@@ -14,7 +14,7 @@ def main():
     print("=" * 50)
     
     # Check if we're in the right directory
-    if not os.path.exists('analytics/db_dashboard.py'):
+    if not os.path.exists('packages/analytics/db_dashboard.py'):
         print("❌ Please run this script from the project root directory")
         print("   (where analytics/ folder is located)")
         sys.exit(1)
@@ -41,7 +41,7 @@ def main():
     try:
         # Add current directory to Python path to ensure imports work
         sys.path.insert(0, os.getcwd())
-        os.system('python analytics/db_dashboard.py')
+        os.system('python packages/analytics/db_dashboard.py')
     except KeyboardInterrupt:
         print("\n👋 Dashboard stopped by user")
     except Exception as e:

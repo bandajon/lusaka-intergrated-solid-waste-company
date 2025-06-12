@@ -16,10 +16,11 @@ import bcrypt
 import psycopg2
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
-try:
-    from database.database_connection import get_db_connection
-except ImportError:
-    from database.database_connection import get_db_connection
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
+
+from database import get_db_connection
 
 class AuthManager:
     """Handles authentication and user management for the dashboard"""
