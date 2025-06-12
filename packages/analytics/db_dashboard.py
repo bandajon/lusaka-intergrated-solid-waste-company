@@ -20,13 +20,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # Import database connection module
-from database_connection import read_companies, read_vehicles, read_weigh_events, check_connection, write_multiple_weigh_events
+# Import from shared components
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
+
+from database.database_connection import read_companies, read_vehicles, read_weigh_events, check_connection, write_multiple_weigh_events
 
 # Import authentication module
-try:
-    from analytics.auth import AuthManager
-except ImportError:
-    from auth import AuthManager
+from auth.auth import AuthManager
 
 # Enable debug mode for console output
 DEBUG = True
@@ -662,7 +664,7 @@ def correct_misclassified_recycling_events(weigh_df, companies_df, persist_to_db
         if persist_to_db and events_to_update:
             try:
                 # Update existing records in database using individual UPDATE statements
-                from database_connection import get_db_engine
+                from database.database_connection import get_db_engine
                 from sqlalchemy import text
                 engine = get_db_engine()
                 

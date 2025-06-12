@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+
+{% block title %}Data Preview - LISWMC{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Data Preview Card -->
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden mb-6">
+        <div class="border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+            <h2 class="text-xl font-medium text-gray-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Data Preview
+            </h2>
+            <span class="px-2.5 py-1 bg-gray-100 text-gray-700 text-sm rounded-full">{{ row_count }} rows total</span>
+        </div>
+        
+        <div class="px-6 py-5">
+            <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-5">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-blue-700">Showing first 100 rows of {{ row_count }} total rows.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mb-6">
+                <h3 class="text-lg font-medium text-gray-700 mb-3">File: {{ filename }}</h3>
+                
+                <div class="mt-4 flex space-x-3">
+                    {% if 'license_plate' in columns %}
+                    <a href="{{ url_for('main.clean_plates', filename=filename) }}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                        </svg>
+                        Clean License Plates
+                    </a>
+                    {% endif %}
+                    
+                    <a href="{{ url_for('main.db_import') }}?file={{ filename }}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12" />
+                        </svg>
+                        Import to Database
+                    </a>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto border border-gray-200 rounded-lg">
+                <div class="max-h-[500px] overflow-y-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead>
+                            <tr>
+                                <th class="sticky top-0 px-4 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                {% for col in columns %}
+                                <th class="sticky top-0 px-4 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{ col }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            {% for row in preview_data %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{{ loop.index }}</td>
+                                {% for col in columns %}
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{{ row[col] }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vehicle Data Card (if applicable) -->
+    {% if 'license_plate' in columns %}
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden mb-6">
+        <div class="border-b border-gray-200 px-6 py-4">
+            <h2 class="text-xl font-medium text-gray-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Vehicle Data Detected
+            </h2>
+        </div>
+        <div class="px-6 py-5">
+            <p class="text-gray-700 mb-4">This file contains license plate data. You can clean and standardize the license plates before importing.</p>
+            <a href="{{ url_for('main.clean_plates', filename=filename) }}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                </svg>
+                Clean License Plates
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Import Options Card -->
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+        <div class="border-b border-gray-200 px-6 py-4">
+            <h2 class="text-xl font-medium text-gray-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                </svg>
+                Import Options
+            </h2>
+        </div>
+        <div class="px-6 py-5">
+            <form action="{{ url_for('main.db_import') }}" method="post">
+                <input type="hidden" name="filename" value="{{ filename }}">
+                
+                <div class="mb-5">
+                    <label for="table" class="block text-sm font-medium text-gray-700 mb-1">Select target table:</label>
+                    <select class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md" id="table" name="table" required>
+                        <option value="" selected disabled>Choose a table...</option>
+                        {% for table in tables %}
+                        <option value="{{ table }}">{{ table|capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="rounded-md bg-yellow-50 p-4 mb-5">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-yellow-800">Warning</h3>
+                            <div class="mt-2 text-sm text-yellow-700">
+                                <p>Importing will generate new UUIDs for all records to avoid conflicts.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12" />
+                    </svg>
+                    Import to Database
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Auto-select the appropriate table based on columns
+    document.addEventListener('DOMContentLoaded', function() {
+        const tableSelect = document.getElementById('table');
+        const columns = {{ columns|tojson }};
+        
+        if (columns.includes('license_plate')) {
+            // This is likely vehicle data
+            const vehicleOption = Array.from(tableSelect.options).find(opt => opt.value === 'vehicle');
+            if (vehicleOption) vehicleOption.selected = true;
+        } 
+        else if (columns.includes('name') && !columns.includes('license_plate')) {
+            // This is likely company data
+            const companyOption = Array.from(tableSelect.options).find(opt => opt.value === 'company');
+            if (companyOption) companyOption.selected = true;
+        }
+    });
+</script>
+{% endblock %}

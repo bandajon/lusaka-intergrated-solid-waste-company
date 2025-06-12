@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LISWMC Location Unifier</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#6b7280',
+                        success: '#10b981',
+                        danger: '#ef4444',
+                        warning: '#f59e0b',
+                        info: '#3b82f6'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex">
+                    <div class="flex-shrink-0 flex items-center">
+                        <a href="{{ url_for('index') }}" class="font-bold text-xl text-primary">
+                            LISWMC Location Unifier
+                        </a>
+                    </div>
+                    <div class="ml-6 flex space-x-8">
+                        <a href="{{ url_for('index') }}" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            Home
+                        </a>
+                        {% if total_groups is defined and total_groups > 0 %}
+                        <a href="{{ url_for('complete_review') }}" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            Summary
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex-grow">
+        <!-- Flash messages -->
+        <div class="fixed top-4 right-4 z-50 w-96 space-y-2">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        {% set alert_color = 'bg-blue-50 text-blue-700 border-blue-200' %}
+                        {% if category == 'success' %}
+                            {% set alert_color = 'bg-green-50 text-green-700 border-green-200' %}
+                        {% elif category == 'danger' %}
+                            {% set alert_color = 'bg-red-50 text-red-700 border-red-200' %}
+                        {% elif category == 'warning' %}
+                            {% set alert_color = 'bg-yellow-50 text-yellow-700 border-yellow-200' %}
+                        {% endif %}
+                        <div class="fade-in rounded-md p-4 {{ alert_color }} border flex justify-between shadow-md" role="alert">
+                            <div>{{ message }}</div>
+                            <button type="button" class="text-gray-400 hover:text-gray-500" onclick="this.parentElement.remove()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer class="bg-white border-t border-gray-200 py-4 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-gray-500 text-sm">
+            LISWMC Location Unifier - Lusaka Integrated Solid Waste Management Company &copy; {{ now.year }}
+        </div>
+    </footer>
+
+    <!-- jQuery (for AJAX) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    
+    <script>
+        // Auto-hide flash messages after 5 seconds
+        $(document).ready(function() {
+            setTimeout(function() {
+                $('.fade-in').fadeOut('slow');
+            }, 5000);
+        });
+    </script>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html> 
