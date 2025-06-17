@@ -84,6 +84,53 @@ def extract_clean_location(remarks):
         else:
             return clean_location.title()
 
+def shorten_location_for_display(location_name):
+    """
+    Shorten long location names for better display in charts.
+    Specifically handles corrected event names that contain weight information.
+    """
+    if not location_name or pd.isna(location_name):
+        return 'Unknown'
+    
+    location_str = str(location_name).strip()
+    
+    # Handle corrected event format
+    if 'Original Remarks:' in location_str or 'Original remarks:' in location_str:
+        # Extract the actual location name from the correction message
+        try:
+            if 'Original Remarks: ' in location_str:
+                parts = location_str.split('Original Remarks: ')
+                if len(parts) > 1:
+                    # Get the last part which should be the actual location
+                    actual_location = parts[-1].strip()
+                    # If it's still too long, truncate
+                    if len(actual_location) > 30:
+                        return actual_location[:27] + '...'
+                    return actual_location
+            elif 'Original remarks: ' in location_str:
+                parts = location_str.split('Original remarks: ')
+                if len(parts) > 1:
+                    actual_location = parts[-1].strip()
+                    if len(actual_location) > 30:
+                        return actual_location[:27] + '...'
+                    return actual_location
+        except:
+            pass
+    
+    # If it starts with "Corrected:", return a short version
+    if location_str.upper().startswith('CORRECTED:'):
+        # Try to extract the actual location if possible
+        if 'Original' in location_str:
+            return shorten_location_for_display(location_str)  # Recursive call to handle the extraction
+        else:
+            return 'Corrected Location'
+    
+    # For any other long location names, truncate them
+    if len(location_str) > 30:
+        return location_str[:27] + '...'
+    
+    return location_str
+
 debug_print("Loading database-connected analytics dashboard...")
 
 # Check DB connection
@@ -1671,7 +1718,11 @@ def populate_filter_options(start_date, end_date, delivery_type,
         
         for loc in sorted(valid_locations):
             if loc and loc != 'Recycle Collection':
-                location_options.append({'label': loc, 'value': loc})
+                # Show shortened name in dropdown but use full name for filtering
+                location_options.append({
+                    'label': shorten_location_for_display(loc), 
+                    'value': loc
+                })
         
         # Add Recycle option if it exists in the filtered data
         if 'Recycle Collection' in valid_locations:
@@ -2971,6 +3022,9 @@ def update_locations_tab(json_data, tab_value, n_intervals, n_clicks):
         # Rename the column for consistency in charts
         location_data.rename(columns={location_column: 'location'}, inplace=True)
         
+        # Apply display shortening to location names
+        location_data['location'] = location_data['location'].apply(shorten_location_for_display)
+        
         location_data = location_data.sort_values('net_weight', ascending=False)
         
         # Convert weights to metric tons for better readability
@@ -3002,8 +3056,14 @@ def update_locations_tab(json_data, tab_value, n_intervals, n_clicks):
         )
         
         # Location trends over time
-        top_locations = location_data.head(5)['location'].tolist()
-        top_locations_df = location_df[location_df[location_column].isin(top_locations)]
+        # Need to map shortened names back to original for filtering
+        location_mapping = dict(zip(
+            location_df[location_column].apply(shorten_location_for_display),
+            location_df[location_column]
+        ))
+        top_locations_short = location_data.head(5)['location'].tolist()
+        top_locations_original = [location_mapping.get(loc, loc) for loc in top_locations_short]
+        top_locations_df = location_df[location_df[location_column].isin(top_locations_original)]
         
         # Group by location and date - create a copy and rename column for consistency
         trend_df = top_locations_df.copy()
@@ -3014,6 +3074,9 @@ def update_locations_tab(json_data, tab_value, n_intervals, n_clicks):
         
         # Rename column for chart consistency
         daily_location_data.rename(columns={'location_clean': 'location'}, inplace=True)
+        
+        # Apply display shortening to location names
+        daily_location_data['location'] = daily_location_data['location'].apply(shorten_location_for_display)
         
         # Convert weights to metric tons
         daily_location_data['net_weight_tons'] = daily_location_data['net_weight'] / 1000
@@ -3048,6 +3111,9 @@ def update_locations_tab(json_data, tab_value, n_intervals, n_clicks):
         
         # Rename column for chart consistency
         avg_weights.rename(columns={location_column: 'location'}, inplace=True)
+        
+        # Apply display shortening to location names
+        avg_weights['location'] = avg_weights['location'].apply(shorten_location_for_display)
         
         # Convert weights to metric tons
         avg_weights['net_weight_tons'] = avg_weights['net_weight'] / 1000

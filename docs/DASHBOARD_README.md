@@ -54,7 +54,7 @@ Once running, open your browser to:
 ### 🎛️ User Interface
 - User info displayed in header
 - Logout button in top-right corner
-- Auto-refresh every 5 minutes
+- Auto-refresh every 5minutes
 - Responsive design with Tailwind CSS
 
 ## 🔧 Database Setup
@@ -74,7 +74,7 @@ python run_migrations.py
 
 ## 🛡️ Security Features
 
-- **Password Hashing**: bcrypt with salt
+- **Password Hashing**: bcrypt 4.3.0 with salt
 - **Session Tokens**: Secure session management
 - **Account Lockout**: 5 failed attempts = 30-minute lockout
 - **SQL Injection Protection**: Parameterized queries
