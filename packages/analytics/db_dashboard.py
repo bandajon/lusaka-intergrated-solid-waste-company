@@ -459,7 +459,7 @@ def estimate_tare_weight(vehicle_id, license_plate, entry_weight, historical_df,
         # Emergency fallback
         return max(entry_weight * 0.25, 1000), "low"
 
-def auto_close_sessions(weigh_df, net_weights_df, max_hours=2, persist_to_db=True):
+def auto_close_sessions(weigh_df, net_weights_df, max_hours=4, persist_to_db=True):
     """
     Automatically close sessions that have been open for more than max_hours
     Returns updated weigh_df with synthetic exit events and notes
@@ -471,6 +471,7 @@ def auto_close_sessions(weigh_df, net_weights_df, max_hours=2, persist_to_db=Tru
         persist_to_db: Whether to save synthetic exits to database (default: True)
     """
     try:
+        max_hours = 6
         open_sessions = find_open_sessions(weigh_df, max_hours)
         
         if open_sessions.empty:
@@ -3347,16 +3348,23 @@ def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks, user_data
         
         table = dash_table.DataTable(**table_config)
         
-        # Create dedicated download button for full dataset (admin only)
+        # Create dedicated download buttons for full dataset (admin only)
         if is_admin:
-            download_button = html.Button(
-                "Export Full Data to CSV", 
-                id='export-button', 
-                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mt-4"
-            )
+            download_button = html.Div([
+                html.Button(
+                    "Export to CSV", 
+                    id='export-csv-button', 
+                    className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mr-2"
+                ),
+                html.Button(
+                    "Export to Excel", 
+                    id='export-excel-button', 
+                    className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                )
+            ], className="mt-4")
         else:
             download_button = html.Div([
-                html.Span("CSV Export", className="text-gray-400 text-sm"),
+                html.Span("Export (CSV/Excel)", className="text-gray-400 text-sm"),
                 html.Span(" (Admin Only)", className="text-gray-500 text-xs ml-1")
             ], className="px-4 py-2 bg-gray-100 text-gray-400 text-sm font-medium rounded-md mt-4 cursor-not-allowed")
         
@@ -3382,18 +3390,23 @@ def update_data_table_tab(json_data, tab_value, n_intervals, n_clicks, user_data
             html.P(f"Details: {str(e)}", className="text-gray-700")
         ], className="text-center py-10")
 
-# Export data to CSV callback
+# Export data to CSV/Excel callback
 @app.callback(
     Output('dummy-export-output', 'children', allow_duplicate=True),
-    Input('export-button', 'n_clicks'),
+    [Input('export-csv-button', 'n_clicks'),
+     Input('export-excel-button', 'n_clicks')],
     State('filtered-data', 'data'),
     State('user-data', 'data'),
     prevent_initial_call=True,
     suppress_callback_exceptions=True
 )
-def export_data(n_clicks, json_data, user_data):
-    if not n_clicks:
+def export_data(csv_clicks, excel_clicks, json_data, user_data):
+    # Determine which button was clicked
+    ctx = callback_context
+    if not ctx.triggered:
         return None
+    
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
     
     # Check if user is admin
     is_admin = False
@@ -3406,14 +3419,17 @@ def export_data(n_clicks, json_data, user_data):
     
     if not is_admin:
         return html.Div([
-            html.P("Access Denied: CSV export is restricted to administrators only.", 
+            html.P("Access Denied: Data export is restricted to administrators only.", 
                    className="text-red-600 mt-2 font-medium"),
             html.P("Please contact your system administrator for data export requests.", 
                    className="text-sm text-gray-600")
         ])
     
     try:
-        debug_print(f"Exporting data to CSV from button click: {n_clicks}")
+        # Determine export format
+        export_format = 'excel' if button_id == 'export-excel-button' else 'csv'
+        debug_print(f"Exporting data to {export_format.upper()} from button: {button_id}")
+        
         # Get filtered dataframe based on session IDs
         if not json_data:
             filtered_df = net_weights_df.copy()
@@ -3424,7 +3440,7 @@ def export_data(n_clicks, json_data, user_data):
                 debug_print(f"Loaded filter data for export: {str(filter_data)[:200]}...")
                 
                 if 'empty' in filter_data and filter_data['empty']:
-                    debug_print("Empty filter data, exporting empty CSV")
+                    debug_print(f"Empty filter data, exporting empty {export_format.upper()}")
                     filtered_df = pd.DataFrame()
                 elif 'session_ids' in filter_data:
                     session_ids = filter_data['session_ids']
@@ -3444,7 +3460,7 @@ def export_data(n_clicks, json_data, user_data):
                 debug_print(traceback.format_exc())
                 filtered_df = net_weights_df.copy()
         
-        # Format dates for better CSV readability
+        # Format dates for better readability
         if 'entry_time' in filtered_df.columns:
             filtered_df['entry_time'] = pd.to_datetime(filtered_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M:%S')
         if 'exit_time' in filtered_df.columns:
@@ -3458,15 +3474,38 @@ def export_data(n_clicks, json_data, user_data):
         # Generate filename with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         base_dir = os.path.dirname(__file__)
-        export_path = os.path.join(base_dir, f'weigh_events_export_{timestamp}.csv')
         
-        # Export to CSV
-        filtered_df.to_csv(export_path, index=False)
+        if export_format == 'excel':
+            export_path = os.path.join(base_dir, f'weigh_events_export_{timestamp}.xlsx')
+            # Export to Excel with formatting
+            with pd.ExcelWriter(export_path, engine='openpyxl') as writer:
+                filtered_df.to_excel(writer, sheet_name='Weigh Events', index=False)
+                
+                # Get the workbook and worksheet to apply formatting
+                workbook = writer.book
+                worksheet = writer.sheets['Weigh Events']
+                
+                # Auto-adjust column widths
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+        else:
+            export_path = os.path.join(base_dir, f'weigh_events_export_{timestamp}.csv')
+            # Export to CSV
+            filtered_df.to_csv(export_path, index=False)
         
         debug_print(f"Data exported to {export_path} ({len(filtered_df)} records)")
         return html.Div([
             html.P(f"Data exported to {export_path}", className="text-green-600 mt-2"),
-            html.P(f"({len(filtered_df)} records exported)", className="text-sm text-gray-600")
+            html.P(f"({len(filtered_df)} records exported to {export_format.upper()})", className="text-sm text-gray-600")
         ])
     except Exception as e:
         debug_print(f"Error exporting data: {e}")

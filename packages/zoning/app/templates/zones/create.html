@@ -1,0 +1,950 @@
+{% extends "base.html" %}
+
+{% block title %}Create Zone - {{ super() }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    #zone-map {
+        height: 70vh; /* Use viewport height for responsive sizing */
+        min-height: 600px; /* Minimum height for usability */
+        margin-bottom: 20px;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        resize: vertical; /* Allow vertical resizing */
+        overflow: hidden;
+    }
+    
+    .map-container {
+        position: relative;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 10px;
+    }
+    
+    .map-size-controls {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        z-index: 1000;
+        background: white;
+        padding: 5px;
+        border-radius: 5px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        display: flex;
+        gap: 5px;
+    }
+    
+    .map-size-controls button {
+        padding: 5px 8px;
+        font-size: 12px;
+        border: none;
+        background: #f8f9fa;
+        cursor: pointer;
+        border-radius: 3px;
+    }
+    
+    .map-size-controls button:hover {
+        background: #e9ecef;
+    }
+    
+    .map-size-controls button.active {
+        background: #007bff;
+        color: white;
+    }
+    
+    .drawing-instructions {
+        background: #e3f2fd;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    
+    .drawing-controls {
+        position: absolute;
+        top: 15px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1000;
+        background: white;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    
+    .drawing-controls button {
+        margin: 0 5px;
+    }
+    
+    .resize-handle {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 20px;
+        height: 20px;
+        background: linear-gradient(-45deg, transparent 40%, #999 40%, #999 60%, transparent 60%),
+                    linear-gradient(-45deg, transparent 30%, #999 30%, #999 50%, transparent 50%);
+        cursor: se-resize;
+        z-index: 1001;
+    }
+    
+    /* Fullscreen map styles */
+    .map-fullscreen {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 9999 !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+    }
+    
+    .map-fullscreen-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0,0,0,0.8);
+        z-index: 9998;
+        display: none;
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        #zone-map {
+            height: 50vh;
+            min-height: 400px;
+        }
+        
+        .drawing-controls {
+            left: 10px;
+            transform: none;
+            padding: 8px;
+        }
+        
+        .drawing-controls button {
+            margin: 2px;
+            padding: 8px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="mb-4">
+        <i class="fas fa-draw-polygon"></i> Create New Zone
+    </h1>
+    
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Draw Zone Boundaries</h5>
+                </div>
+                <div class="card-body">
+                    <div class="drawing-instructions" id="drawing-instructions">
+                        <i class="fas fa-info-circle"></i> 
+                        <strong>Instructions:</strong> 
+                        Click the "Draw Polygon" button, then click on the map to add points.
+                        Click the first point again to close the polygon.
+                        Use "Edit" to modify or "Delete" to remove the zone.
+                        <br><br>
+                        <i class="fas fa-eye"></i>
+                        <strong>Existing zones are shown in light colors with their names</strong> - avoid overlapping with them when drawing your new zone (shown in bright orange).
+                    </div>
+                    
+                    <div class="drawing-instructions" id="edit-instructions" style="display: none; background: #fff3cd; border: 1px solid #ffeaa7;">
+                        <i class="fas fa-edit"></i> 
+                        <strong>Edit Mode:</strong> 
+                        You can now adjust the zone boundaries:
+                        <br>• <strong>Drag vertices</strong> (corner points) to reshape the zone
+                        <br>• <strong>Drag edges</strong> to add new vertices and reshape segments
+                        <br>• <strong>Right-click vertices</strong> to delete them (minimum 3 vertices required)
+                        <br>• Click "Save Edit" when finished to confirm your changes
+                    </div>
+                    
+                    <div class="map-container">
+                        <div id="zone-map"></div>
+                        
+                        <!-- Map size controls -->
+                        <div class="map-size-controls">
+                            <button type="button" id="map-small" title="Small Map">S</button>
+                            <button type="button" id="map-medium" class="active" title="Medium Map">M</button>
+                            <button type="button" id="map-large" title="Large Map">L</button>
+                            <button type="button" id="map-fullscreen" title="Fullscreen">⛶</button>
+                        </div>
+                        
+                        <!-- Drawing controls -->
+                        <div class="drawing-controls">
+                            <button type="button" class="btn btn-sm btn-primary" id="draw-btn">
+                                <i class="fas fa-draw-polygon"></i> Draw Polygon
+                            </button>
+                            <button type="button" class="btn btn-sm btn-warning" id="edit-btn" disabled>
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger" id="delete-btn" disabled>
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                        
+                        <!-- Resize handle for manual dragging -->
+                        <div class="resize-handle" id="resize-handle"></div>
+                    </div>
+                    
+                    <!-- Fullscreen overlay -->
+                    <div class="map-fullscreen-overlay" id="fullscreen-overlay"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Zone Details</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" id="zone-form">
+                        {{ form.hidden_tag() }}
+                        {{ form.geometry }}
+                        
+                        <div class="mb-3">
+                            {{ form.name.label(class="form-label") }}
+                            {{ form.name(class="form-control") }}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.code.label(class="form-label") }}
+                            {{ form.code(class="form-control") }}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.zone_type.label(class="form-label") }}
+                            {{ form.zone_type(class="form-select") }}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control", rows=3) }}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.estimated_population.label(class="form-label") }}
+                            {{ form.estimated_population(class="form-control") }}
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                {{ form.household_count.label(class="form-label") }}
+                                {{ form.household_count(class="form-control") }}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                {{ form.business_count.label(class="form-label") }}
+                                {{ form.business_count(class="form-control") }}
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.collection_frequency_week.label(class="form-label") }}
+                            {{ form.collection_frequency_week(class="form-control") }}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.status.label(class="form-label") }}
+                            {{ form.status(class="form-select") }}
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            {{ form.submit(class="btn btn-primary", id="submit-btn", disabled=true) }}
+                            <a href="{{ url_for('zones.list') }}" class="btn btn-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h6>Zone Statistics</h6>
+                    <p class="mb-1">Area: <span id="zone-area">-</span> km²</p>
+                    <p class="mb-1">Perimeter: <span id="zone-perimeter">-</span> km</p>
+                    <p class="mb-0">Points: <span id="zone-points">-</span></p>
+                </div>
+            </div>
+            
+            <!-- Enhanced Real-Time Analytics Panel -->
+            <div class="card mt-3" id="analytics-panel" style="display: none;">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">
+                        <i class="fas fa-chart-line"></i> Real-Time Analytics
+                    </h6>
+                    <div class="spinner-border spinner-border-sm" id="analysis-spinner" style="display: none;"></div>
+                </div>
+                <div class="card-body" id="analytics-content">
+                    <!-- Analytics content will be populated here -->
+                    <div class="text-center text-muted">
+                        <i class="fas fa-draw-polygon fa-2x mb-2"></i>
+                        <p>Draw a zone to see comprehensive analytics</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Enhanced Recommendations Panel -->
+            <div class="card mt-3" id="recommendations-panel" style="display: none;">
+                <div class="card-header">
+                    <h6 class="mb-0">
+                        <i class="fas fa-lightbulb"></i> Smart Recommendations
+                    </h6>
+                </div>
+                <div class="card-body" id="recommendations-content">
+                    <!-- Recommendations will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/zone_analyzer.js') }}"></script>
+<script>
+var map;
+var drawingManager;
+var currentPolygon = null;
+var zoneAnalyzer;
+var existingZoneLabels = []; // Array to store zone labels
+
+function loadExistingZones() {
+    // Load existing zones data from server
+    var existingZones = {{ existing_zones | tojson }};
+    console.log('Loading existing zones:', existingZones);
+    
+    if (existingZones && existingZones.length > 0) {
+        existingZones.forEach(function(zone, index) {
+            if (zone.geometry && zone.geometry.coordinates) {
+                try {
+                    // Create GeoJSON feature for existing zone
+                    var feature = {
+                        type: 'Feature',
+                        geometry: zone.geometry,
+                        properties: {
+                            id: zone.id,
+                            name: zone.name,
+                            zone_type: zone.zone_type,
+                            status: zone.status
+                        }
+                    };
+                    
+                    // Add zone as a lighter, semi-transparent overlay
+                    var dataFeature = map.data.addGeoJson(feature)[0];
+                    
+                    // Calculate zone centroid (interior point) for better label placement
+                    var center = null;
+                    if (zone.geometry.type === 'Polygon' && zone.geometry.coordinates && zone.geometry.coordinates[0]) {
+                        // Calculate the actual centroid of the polygon using coordinates
+                        var coords = zone.geometry.coordinates[0];
+                        var latSum = 0, lngSum = 0;
+                        var validPoints = coords.length - 1; // Exclude duplicate last point
+                        
+                        if (validPoints > 0) {
+                            for (var i = 0; i < validPoints; i++) {
+                                if (coords[i] && coords[i].length >= 2) {
+                                    latSum += coords[i][1];
+                                    lngSum += coords[i][0];
+                                }
+                            }
+                            
+                            center = new google.maps.LatLng(latSum / validPoints, lngSum / validPoints);
+                        }
+                    }
+                    
+                    // Only create label if we have a valid center
+                    if (center) {
+                        
+                        // Create text overlay for zone name directly on the zone
+                        var label = new google.maps.OverlayView();
+                        label.position = center;
+                        label.zoneName = zone.name;
+                        label.zoneId = zone.id;
+                        
+                        label.onAdd = function() {
+                            var div = document.createElement('div');
+                            div.style.position = 'absolute';
+                            div.style.background = 'rgba(255, 255, 255, 0.9)';
+                            div.style.border = '2px solid #333';
+                            div.style.borderRadius = '6px';
+                            div.style.padding = '4px 8px';
+                            div.style.fontSize = '13px';
+                            div.style.fontWeight = 'bold';
+                            div.style.color = '#000';
+                            div.style.whiteSpace = 'nowrap';
+                            div.style.pointerEvents = 'none';
+                            div.style.textAlign = 'center';
+                            div.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+                            div.style.zIndex = '1000';
+                            div.innerHTML = this.zoneName;
+                            this.div = div;
+                            
+                            var panes = this.getPanes();
+                            panes.overlayLayer.appendChild(div);
+                        };
+                        
+                        label.draw = function() {
+                            var overlayProjection = this.getProjection();
+                            if (!overlayProjection || !this.div) return;
+                            
+                            var position = overlayProjection.fromLatLngToDivPixel(this.position);
+                            if (!position) return;
+                            
+                            var div = this.div;
+                            div.style.left = (position.x - div.offsetWidth / 2) + 'px';
+                            div.style.top = (position.y - div.offsetHeight / 2) + 'px';
+                            
+                            // Always show the label - let Google Maps handle visibility
+                            div.style.display = 'block';
+                            
+                            // Debug logging
+                            console.log('Label positioned for zone:', this.zoneName, 'at', position.x, position.y);
+                        };
+                        
+                        label.onRemove = function() {
+                            if (this.div && this.div.parentNode) {
+                                this.div.parentNode.removeChild(this.div);
+                                this.div = null;
+                            }
+                        };
+                        
+                        label.setMap(map);
+                        existingZoneLabels.push(label);
+                        
+                        console.log('Created label for zone:', zone.name, 'at center:', center.toString());
+                    } else {
+                        console.warn('Could not create label for zone:', zone.name, 'due to invalid geometry or center calculation');
+                    }
+                    
+                } catch (error) {
+                    console.error('Error rendering existing zone:', zone.name, error);
+                }
+            }
+        });
+        
+        // Style existing zones with light, muted colors
+        map.data.setStyle(function(feature) {
+            var zoneType = feature.getProperty('zone_type');
+            var zoneStatus = feature.getProperty('status');
+            
+            // Use medium-dark colors for existing zones - visible but not overwhelming
+            var existingZoneColors = {
+                'RESIDENTIAL': '#A8D5A8',   // Medium green
+                'COMMERCIAL': '#F0D568',    // Medium yellow
+                'INDUSTRIAL': '#B0B0B0',    // Medium gray
+                'MIXED_USE': '#A8C8F0',     // Medium blue
+                'GREEN_SPACE': '#A8D5A8',   // Medium green
+                'INSTITUTIONAL': '#C8A8F0'  // Medium purple
+            };
+            
+            return {
+                fillColor: existingZoneColors[zoneType] || '#C0C0C0',
+                strokeWeight: 2,
+                strokeColor: '#666666',
+                fillOpacity: 0.5,
+                strokeOpacity: 0.8
+            };
+        });
+        
+        // Add hover effect for existing zones
+        map.data.addListener('mouseover', function(event) {
+            var feature = event.feature;
+            map.data.overrideStyle(feature, {
+                fillOpacity: 0.7,
+                strokeWeight: 3,
+                strokeColor: '#333333'
+            });
+        });
+        
+        map.data.addListener('mouseout', function(event) {
+            map.data.revertStyle();
+        });
+    }
+}
+
+function checkAndLoadCSVCoordinates() {
+    // Check URL parameters for coordinates from CSV upload
+    const urlParams = new URLSearchParams(window.location.search);
+    const coordinatesParam = urlParams.get('coordinates');
+    const nameParam = urlParams.get('name');
+    const sourceParam = urlParams.get('source');
+    
+    if (coordinatesParam && sourceParam === 'csv') {
+        try {
+            const coordinates = JSON.parse(coordinatesParam);
+            console.log('Loading CSV coordinates:', coordinates);
+            
+            if (coordinates.length >= 3) {
+                // Set zone name if provided
+                if (nameParam) {
+                    document.getElementById('name').value = nameParam;
+                    // Auto-generate code from name
+                    document.getElementById('code').value = nameParam.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+                }
+                
+                // Create polygon from coordinates
+                createPolygonFromCoordinates(coordinates);
+                
+                // Clear URL parameters so refresh doesn't reload
+                if (history.replaceState) {
+                    const url = window.location.href.split('?')[0];
+                    history.replaceState(null, null, url);
+                }
+            }
+        } catch (error) {
+            console.error('Error parsing CSV coordinates:', error);
+        }
+    }
+}
+
+function createPolygonFromCoordinates(coordinates) {
+    // Convert coordinates to Google Maps LatLng format
+    const path = coordinates.map(coord => ({
+        lat: coord[1], // latitude
+        lng: coord[0]  // longitude
+    }));
+    
+    // Create polygon
+    const polygon = new google.maps.Polygon({
+        paths: path,
+        fillColor: '#FF6B35',
+        fillOpacity: 0.6,
+        strokeWeight: 3,
+        strokeColor: '#FFFFFF',
+        editable: true,
+        draggable: true
+    });
+    
+    // Add to map
+    polygon.setMap(map);
+    
+    // Remove previous polygon if exists
+    if (currentPolygon) {
+        currentPolygon.setMap(null);
+    }
+    
+    currentPolygon = polygon;
+    
+    // Enable edit and delete buttons
+    document.getElementById('edit-btn').disabled = false;
+    document.getElementById('delete-btn').disabled = false;
+    document.getElementById('submit-btn').disabled = false;
+    
+    // Update zone data
+    updateZoneData();
+    
+    // Add listeners for changes
+    google.maps.event.addListener(polygon.getPath(), 'set_at', function() {
+        updateZoneData();
+        if (zoneAnalyzer) {
+            zoneAnalyzer.triggerAnalysis();
+        }
+    });
+    google.maps.event.addListener(polygon.getPath(), 'insert_at', function() {
+        updateZoneData();
+        if (zoneAnalyzer) {
+            zoneAnalyzer.triggerAnalysis();
+        }
+    });
+    google.maps.event.addListener(polygon.getPath(), 'remove_at', function() {
+        updateZoneData();
+        if (zoneAnalyzer) {
+            zoneAnalyzer.triggerAnalysis();
+        }
+    });
+    
+    // Fit map bounds to polygon
+    const bounds = new google.maps.LatLngBounds();
+    path.forEach(point => bounds.extend(point));
+    map.fitBounds(bounds);
+    
+    // Trigger zone analysis
+    setTimeout(() => {
+        if (zoneAnalyzer) {
+            zoneAnalyzer.currentZone = {
+                toGeoJSON: function() {
+                    return getPolygonGeoJSON(polygon);
+                }
+            };
+            zoneAnalyzer.triggerAnalysis();
+        }
+    }, 1000);
+    
+    console.log('Polygon created from CSV coordinates with', coordinates.length, 'points');
+}
+
+function initMap() {
+    // Initialize map centered on Lusaka
+    map = new google.maps.Map(document.getElementById('zone-map'), {
+        zoom: {{ zoom }},
+        center: {lat: {{ center.lat }}, lng: {{ center.lng }}},
+        mapTypeId: 'roadmap'
+    });
+
+    // Load and display existing zones first
+    loadExistingZones();
+    
+    // Check for coordinates from CSV upload
+    checkAndLoadCSVCoordinates();
+
+    // Initialize drawing manager
+    drawingManager = new google.maps.drawing.DrawingManager({
+        drawingMode: null,
+        drawingControl: false,
+        polygonOptions: {
+            fillColor: '#FF6B35', // Bright orange for new zone
+            fillOpacity: 0.6,
+            strokeWeight: 3,
+            strokeColor: '#FFFFFF',
+            editable: true,
+            draggable: true
+        }
+    });
+    drawingManager.setMap(map);
+
+    // Handle polygon complete event
+    google.maps.event.addListener(drawingManager, 'polygoncomplete', function(polygon) {
+        // Remove previous polygon if exists
+        if (currentPolygon) {
+            currentPolygon.setMap(null);
+        }
+        
+        currentPolygon = polygon;
+        drawingManager.setDrawingMode(null);
+        
+        // Enable edit and delete buttons
+        document.getElementById('edit-btn').disabled = false;
+        document.getElementById('delete-btn').disabled = false;
+        document.getElementById('submit-btn').disabled = false;
+        
+        // Update zone data
+        updateZoneData();
+        
+        // Add listeners for changes (both drawing and editing)
+        google.maps.event.addListener(polygon.getPath(), 'set_at', function() {
+            updateZoneData();
+            // Trigger analysis if zone analyzer is available
+            if (zoneAnalyzer) {
+                zoneAnalyzer.triggerAnalysis();
+            }
+        });
+        google.maps.event.addListener(polygon.getPath(), 'insert_at', function() {
+            updateZoneData();
+            if (zoneAnalyzer) {
+                zoneAnalyzer.triggerAnalysis();
+            }
+        });
+        google.maps.event.addListener(polygon.getPath(), 'remove_at', function() {
+            updateZoneData();
+            if (zoneAnalyzer) {
+                zoneAnalyzer.triggerAnalysis();
+            }
+        });
+        
+        // Trigger zone analysis
+        if (zoneAnalyzer) {
+            zoneAnalyzer.currentZone = {
+                toGeoJSON: function() {
+                    return getPolygonGeoJSON(polygon);
+                }
+            };
+            zoneAnalyzer.triggerAnalysis();
+        }
+    });
+    
+    // Initialize the zone analyzer
+    setTimeout(function() {
+        zoneAnalyzer = new ZoneAnalyzer(map, {
+            enableRealTimeAnalysis: true,
+            enableQuickValidation: true,
+            analysisDelay: 1500 // Slightly longer delay for better UX while drawing
+        });
+    }, 1000);
+}
+
+// Map resizing functionality
+function setMapSize(size) {
+    const mapElement = document.getElementById('zone-map');
+    const buttons = document.querySelectorAll('.map-size-controls button');
+    
+    // Remove active class from all buttons
+    buttons.forEach(btn => btn.classList.remove('active'));
+    
+    switch(size) {
+        case 'small':
+            mapElement.style.height = '400px';
+            mapElement.style.minHeight = '400px';
+            document.getElementById('map-small').classList.add('active');
+            break;
+        case 'medium':
+            mapElement.style.height = '70vh';
+            mapElement.style.minHeight = '600px';
+            document.getElementById('map-medium').classList.add('active');
+            break;
+        case 'large':
+            mapElement.style.height = '85vh';
+            mapElement.style.minHeight = '800px';
+            document.getElementById('map-large').classList.add('active');
+            break;
+    }
+    
+    // Trigger map resize
+    setTimeout(() => {
+        google.maps.event.trigger(map, 'resize');
+    }, 100);
+}
+
+function toggleFullscreen() {
+    const mapElement = document.getElementById('zone-map');
+    const overlay = document.getElementById('fullscreen-overlay');
+    
+    if (mapElement.classList.contains('map-fullscreen')) {
+        // Exit fullscreen
+        mapElement.classList.remove('map-fullscreen');
+        overlay.style.display = 'none';
+        document.body.style.overflow = 'auto';
+    } else {
+        // Enter fullscreen
+        mapElement.classList.add('map-fullscreen');
+        overlay.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    }
+    
+    // Trigger map resize
+    setTimeout(() => {
+        google.maps.event.trigger(map, 'resize');
+    }, 100);
+}
+
+// Manual resize functionality
+function initManualResize() {
+    const mapElement = document.getElementById('zone-map');
+    const resizeHandle = document.getElementById('resize-handle');
+    let isResizing = false;
+    let startY = 0;
+    let startHeight = 0;
+    
+    resizeHandle.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = parseInt(document.defaultView.getComputedStyle(mapElement).height, 10);
+        document.addEventListener('mousemove', doResize);
+        document.addEventListener('mouseup', stopResize);
+        e.preventDefault();
+    });
+    
+    function doResize(e) {
+        if (!isResizing) return;
+        const newHeight = startHeight + e.clientY - startY;
+        if (newHeight > 300) { // Minimum height
+            mapElement.style.height = newHeight + 'px';
+            mapElement.style.minHeight = newHeight + 'px';
+        }
+    }
+    
+    function stopResize(e) {
+        isResizing = false;
+        document.removeEventListener('mousemove', doResize);
+        document.removeEventListener('mouseup', stopResize);
+        // Trigger map resize
+        setTimeout(() => {
+            google.maps.event.trigger(map, 'resize');
+        }, 100);
+    }
+}
+
+function showEditInstructions(show) {
+    var drawingInstructions = document.getElementById('drawing-instructions');
+    var editInstructions = document.getElementById('edit-instructions');
+    
+    if (show) {
+        drawingInstructions.style.display = 'none';
+        editInstructions.style.display = 'block';
+    } else {
+        drawingInstructions.style.display = 'block';
+        editInstructions.style.display = 'none';
+    }
+}
+
+// Initialize resize controls when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    // Map size controls
+    document.getElementById('map-small').addEventListener('click', () => setMapSize('small'));
+    document.getElementById('map-medium').addEventListener('click', () => setMapSize('medium'));
+    document.getElementById('map-large').addEventListener('click', () => setMapSize('large'));
+    document.getElementById('map-fullscreen').addEventListener('click', toggleFullscreen);
+    
+    // Initialize manual resize
+    initManualResize();
+    
+    // Close fullscreen with Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            const mapElement = document.getElementById('zone-map');
+            if (mapElement.classList.contains('map-fullscreen')) {
+                toggleFullscreen();
+            }
+        }
+    });
+    
+    // Close fullscreen by clicking overlay
+    document.getElementById('fullscreen-overlay').addEventListener('click', toggleFullscreen);
+});
+
+// Button handlers
+document.getElementById('draw-btn').addEventListener('click', function() {
+    drawingManager.setDrawingMode(google.maps.drawing.OverlayType.POLYGON);
+});
+
+document.getElementById('edit-btn').addEventListener('click', function() {
+    if (currentPolygon) {
+        var isCurrentlyEditable = currentPolygon.getEditable();
+        currentPolygon.setEditable(!isCurrentlyEditable);
+        
+        if (!isCurrentlyEditable) {
+            // Entering edit mode
+            this.classList.remove('btn-warning');
+            this.classList.add('btn-success');
+            this.innerHTML = '<i class="fas fa-check"></i> Save Edit';
+            
+            // Disable drawing mode while editing
+            drawingManager.setDrawingMode(null);
+            document.getElementById('draw-btn').disabled = true;
+            
+            // Show edit instructions
+            showEditInstructions(true);
+            
+        } else {
+            // Exiting edit mode
+            this.classList.remove('btn-success');
+            this.classList.add('btn-warning');
+            this.innerHTML = '<i class="fas fa-edit"></i> Edit';
+            
+            // Re-enable drawing button
+            document.getElementById('draw-btn').disabled = false;
+            
+            // Hide edit instructions
+            showEditInstructions(false);
+            
+            // Update zone data after editing
+            updateZoneData();
+        }
+    }
+});
+
+document.getElementById('delete-btn').addEventListener('click', function() {
+    if (currentPolygon) {
+        currentPolygon.setMap(null);
+        currentPolygon = null;
+        document.getElementById('geometry').value = '';
+        document.getElementById('edit-btn').disabled = true;
+        document.getElementById('delete-btn').disabled = true;
+        document.getElementById('submit-btn').disabled = true;
+        updateStats(null);
+        
+        // Clear zone analysis
+        if (zoneAnalyzer) {
+            zoneAnalyzer.currentZone = null;
+            zoneAnalyzer.clearAnalysis();
+        }
+    }
+});
+
+function getPolygonGeoJSON(polygon) {
+    const path = polygon.getPath();
+    const coordinates = [];
+    
+    for (let i = 0; i < path.getLength(); i++) {
+        const latLng = path.getAt(i);
+        coordinates.push([latLng.lng(), latLng.lat()]);
+    }
+    
+    // Close the polygon
+    if (coordinates.length > 0) {
+        coordinates.push(coordinates[0]);
+    }
+    
+    return {
+        type: 'Feature',
+        geometry: {
+            type: 'Polygon',
+            coordinates: [coordinates]
+        },
+        properties: {}
+    };
+}
+
+function updateZoneData() {
+    if (!currentPolygon) return;
+    
+    // Convert polygon to GeoJSON
+    const geojson = getPolygonGeoJSON(currentPolygon);
+    
+    // Debug logging
+    console.log('Generated GeoJSON:', geojson);
+    console.log('Geometry being stored:', geojson.geometry);
+    console.log('Coordinates:', geojson.geometry.coordinates);
+    
+    // Validate geometry before storing
+    if (!geojson.geometry || !geojson.geometry.coordinates || !geojson.geometry.coordinates[0] || geojson.geometry.coordinates[0].length < 4) {
+        console.error('Invalid geometry data:', geojson);
+        alert('Error: Invalid polygon geometry. Please redraw the zone.');
+        return;
+    }
+    
+    document.getElementById('geometry').value = JSON.stringify(geojson.geometry);
+    
+    // Calculate statistics
+    updateStats(geojson.geometry);
+    
+    // Trigger zone analysis
+    if (zoneAnalyzer) {
+        zoneAnalyzer.currentZone = {
+            toGeoJSON: function() {
+                return geojson;
+            }
+        };
+        zoneAnalyzer.triggerAnalysis();
+    }
+}
+
+function updateStats(geojson) {
+    if (!geojson || !geojson.coordinates[0].length > 1) {
+        document.getElementById('zone-area').textContent = '-';
+        document.getElementById('zone-perimeter').textContent = '-';
+        document.getElementById('zone-points').textContent = '-';
+        return;
+    }
+    
+    // Calculate area using Google Maps geometry library
+    const path = [];
+    for (const coord of geojson.coordinates[0]) {
+        path.push(new google.maps.LatLng(coord[1], coord[0]));
+    }
+    
+    const area = google.maps.geometry.spherical.computeArea(path) / 1000000; // Convert to km²
+    const perimeter = google.maps.geometry.spherical.computeLength(path) / 1000; // Convert to km
+    const points = geojson.coordinates[0].length - 1; // Exclude duplicate last point
+    
+    document.getElementById('zone-area').textContent = area.toFixed(3);
+    document.getElementById('zone-perimeter').textContent = perimeter.toFixed(2);
+    document.getElementById('zone-points').textContent = points;
+}
+
+// Form validation
+document.getElementById('zone-form').addEventListener('submit', function(e) {
+    if (!currentPolygon) {
+        e.preventDefault();
+        alert('Please draw a zone on the map before submitting.');
+        return false;
+    }
+});
+</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key={{ config.GOOGLE_MAPS_API_KEY }}&libraries=drawing,geometry&callback=initMap"></script>
+{% endblock %}

@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}Zone Map{% endblock %}
+
+{% block content %}
+<div class="container-fluid h-100">
+    <div class="row h-100">
+        <div class="col-12 p-0">
+            <div id="map" style="height: calc(100vh - 56px);"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Zone Info Modal -->
+<div class="modal fade" id="zoneInfoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="zoneModalTitle">Zone Information</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="zoneModalBody">
+                <!-- Zone info will be loaded here -->
+            </div>
+            <div class="modal-footer">
+                <a href="#" id="viewZoneBtn" class="btn btn-primary">View Details</a>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/zone_analyzer.js') }}"></script>
+<script>
+    var map;
+    var infoWindow;
+    
+    function initMap() {
+        // Initialize map centered on Lusaka
+        map = new google.maps.Map(document.getElementById('map'), {
+            zoom: {{ zoom }},
+            center: {lat: {{ center.lat }}, lng: {{ center.lng }}},
+            mapTypeId: 'roadmap'
+        });
+        
+        infoWindow = new google.maps.InfoWindow();
+        
+        // Zone colors by type
+        var zoneColors = {
+            'residential': '#28a745',
+            'commercial': '#ffc107',
+            'industrial': '#dc3545',
+            'institutional': '#6c757d',
+            'mixed_use': '#17a2b8'
+        };
+        
+        // Load zones GeoJSON
+        var zonesData = {{ zone_geojson | tojson }};
+        
+        // Add zones to map
+        map.data.addGeoJson(zonesData);
+        
+        // Style zones based on type
+        map.data.setStyle(function(feature) {
+            var zoneType = feature.getProperty('zone_type');
+            return {
+                fillColor: zoneColors[zoneType] || '#3388ff',
+                strokeWeight: 2,
+                strokeColor: '#ffffff',
+                fillOpacity: 0.5
+            };
+        });
+        
+        // Add click listener for zones
+        map.data.addListener('click', function(event) {
+            showZoneInfo(event.feature);
+        });
+        
+        // Add mouseover effect
+        map.data.addListener('mouseover', function(event) {
+            map.data.revertStyle();
+            map.data.overrideStyle(event.feature, {
+                strokeWeight: 4,
+                fillOpacity: 0.7
+            });
+        });
+        
+        map.data.addListener('mouseout', function(event) {
+            map.data.revertStyle();
+        });
+        
+        // Fit bounds to all zones
+        if (zonesData.features.length > 0) {
+            var bounds = new google.maps.LatLngBounds();
+            
+            map.data.forEach(function(feature) {
+                feature.getGeometry().forEachLatLng(function(latLng) {
+                    bounds.extend(latLng);
+                });
+            });
+            
+            map.fitBounds(bounds);
+        }
+        
+        // Add legend
+        addLegend();
+    }
+    
+    function showZoneInfo(feature) {
+        var properties = {
+            id: feature.getId(),
+            name: feature.getProperty('name'),
+            code: feature.getProperty('code'),
+            zone_type: feature.getProperty('zone_type'),
+            status: feature.getProperty('status'),
+            area_sqm: feature.getProperty('area_sqm'),
+            population: feature.getProperty('population')
+        };
+        
+        document.getElementById('zoneModalTitle').textContent = properties.name;
+        
+        var content = `
+            <dl class="row">
+                <dt class="col-sm-4">Code:</dt>
+                <dd class="col-sm-8">${properties.code}</dd>
+                
+                <dt class="col-sm-4">Type:</dt>
+                <dd class="col-sm-8">${properties.zone_type}</dd>
+                
+                <dt class="col-sm-4">Status:</dt>
+                <dd class="col-sm-8">${properties.status}</dd>
+                
+                <dt class="col-sm-4">Area:</dt>
+                <dd class="col-sm-8">${(properties.area_sqm || 0).toLocaleString()} m²</dd>
+                
+                <dt class="col-sm-4">Population:</dt>
+                <dd class="col-sm-8">${(properties.population || 0).toLocaleString()}</dd>
+            </dl>
+        `;
+        
+        document.getElementById('zoneModalBody').innerHTML = content;
+        document.getElementById('viewZoneBtn').href = `/zones/${properties.id}`;
+        
+        var modal = new bootstrap.Modal(document.getElementById('zoneInfoModal'));
+        modal.show();
+    }
+    
+    function addLegend() {
+        var legend = document.createElement('div');
+        legend.className = 'legend bg-white p-3 rounded shadow';
+        legend.innerHTML = `
+            <h6>Zone Types</h6>
+            <div><span class="legend-color" style="background:#28a745"></span> Residential</div>
+            <div><span class="legend-color" style="background:#ffc107"></span> Commercial</div>
+            <div><span class="legend-color" style="background:#dc3545"></span> Industrial</div>
+            <div><span class="legend-color" style="background:#6c757d"></span> Institutional</div>
+            <div><span class="legend-color" style="background:#17a2b8"></span> Mixed Use</div>
+        `;
+        
+        map.controls[google.maps.ControlPosition.BOTTOM_RIGHT].push(legend);
+    }
+</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key={{ config.GOOGLE_MAPS_API_KEY }}&callback=initMap"></script>
+
+<style>
+.legend {
+    line-height: 1.5;
+}
+.legend-color {
+    display: inline-block;
+    width: 20px;
+    height: 12px;
+    margin-right: 5px;
+    border: 1px solid #ccc;
+}
+</style>
+{% endblock %}

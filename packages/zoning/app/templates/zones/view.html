@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+
+{% block title %}{{ zone.name }} - Zone Details{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col">
+            <h1>{{ zone.name }}</h1>
+            <p class="text-muted">Zone Code: {{ zone.code }}</p>
+        </div>
+        <div class="col-auto">
+            {% if current_user.can_edit_zones() %}
+                <a href="{{ url_for('zones.edit', id=zone.id) }}" class="btn btn-primary">
+                    <i class="bi bi-pencil"></i> Edit Zone
+                </a>
+            {% endif %}
+            <a href="{{ url_for('zones.list') }}" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back to List
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Zone Information -->
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Zone Information</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-sm-4">Type:</dt>
+                        <dd class="col-sm-8">
+                            <span class="badge bg-primary">{{ zone.zone_type.value|title }}</span>
+                        </dd>
+
+                        <dt class="col-sm-4">Status:</dt>
+                        <dd class="col-sm-8">
+                            {% if zone.status.value == 'active' %}
+                                <span class="badge bg-success">Active</span>
+                            {% elif zone.status.value == 'draft' %}
+                                <span class="badge bg-warning">Draft</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ zone.status.value|title }}</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-sm-4">Area:</dt>
+                        <dd class="col-sm-8">
+                            {% if zone.area_sqm and zone.area_sqm > 0 %}
+                                {{ "{:,.3f}".format(zone.area_sqm / 1000000) }} km²
+                                <small class="text-muted">({{ "{:,.0f}".format(zone.area_sqm) }} m²)</small>
+                            {% else %}
+                                <span class="text-muted">Not calculated</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-sm-4">Perimeter:</dt>
+                        <dd class="col-sm-8">
+                            {% if zone.perimeter_m and zone.perimeter_m > 0 %}
+                                {{ "{:,.2f}".format(zone.perimeter_m / 1000) }} km
+                                <small class="text-muted">({{ "{:,.0f}".format(zone.perimeter_m) }} m)</small>
+                            {% else %}
+                                <span class="text-muted">Not calculated</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-sm-4">Created:</dt>
+                        <dd class="col-sm-8">{{ zone.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+
+                        <dt class="col-sm-4">Import Source:</dt>
+                        <dd class="col-sm-8">{{ zone.import_source|title }}</dd>
+
+                        {% if zone.description %}
+                        <dt class="col-sm-4">Description:</dt>
+                        <dd class="col-sm-8">{{ zone.description }}</dd>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Population & Waste Data -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Population & Waste Management</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-sm-6">Estimated Population:</dt>
+                        <dd class="col-sm-6">
+                            <strong>{{ "{:,}".format(zone.estimated_population or 0) }}</strong>
+                            {% if zone.zone_metadata and zone.zone_metadata.get('population_estimation') %}
+                                {% set pop_est = zone.zone_metadata.population_estimation %}
+                                <br><small class="text-muted">
+                                    Method: {{ pop_est.get('primary_method', 'Unknown') }}
+                                    | Confidence: 
+                                    {% set confidence = pop_est.get('confidence', 'low') %}
+                                    {% if confidence == 'high' %}
+                                        <span class="badge bg-success">{{ confidence|title }}</span>
+                                    {% elif confidence == 'medium' %}
+                                        <span class="badge bg-warning">{{ confidence|title }}</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ confidence|title }}</span>
+                                    {% endif %}
+                                </small>
+                                
+                                {% if pop_est.get('comparison') and pop_est.comparison.get('estimates') %}
+                                <br><small class="text-info">
+                                    <a href="#" data-bs-toggle="collapse" data-bs-target="#population-details" aria-expanded="false">
+                                        <i class="bi bi-info-circle"></i> View estimation details
+                                    </a>
+                                </small>
+                                <div class="collapse mt-2" id="population-details">
+                                    <div class="card card-body bg-light">
+                                        <small>
+                                            <strong>Estimation Methods:</strong><br>
+                                            {% for method, estimate in pop_est.comparison.estimates.items() %}
+                                                • {{ method.replace('_', ' ')|title }}: {{ "{:,}".format(estimate|int) }}<br>
+                                            {% endfor %}
+                                            <br><strong>Agreement Level:</strong> {{ pop_est.comparison.get('agreement_level', 'Unknown')|title }}
+                                            {% if pop_est.comparison.get('max_difference_pct') %}
+                                                <br><strong>Max Difference:</strong> {{ "{:.1f}".format(pop_est.comparison.max_difference_pct) }}%
+                                            {% endif %}
+                                        </small>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-sm-6">Household Count:</dt>
+                        <dd class="col-sm-6">{{ "{:,}".format(zone.household_count or 0) }}</dd>
+
+                        <dt class="col-sm-6">Business Count:</dt>
+                        <dd class="col-sm-6">{{ "{:,}".format(zone.business_count or 0) }}</dd>
+
+                        <dt class="col-sm-6">Waste Generation:</dt>
+                        <dd class="col-sm-6">{{ "{:,.1f}".format(zone.waste_generation_kg_day or 0) }} kg/day</dd>
+
+                        <dt class="col-sm-6">Collection Frequency:</dt>
+                        <dd class="col-sm-6">{{ zone.collection_frequency_week or 2 }} times/week</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map -->
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Zone Map</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div id="map" style="height: 400px;"></div>
+                </div>
+            </div>
+
+            <!-- Recent Analyses -->
+            {% if analyses %}
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Recent Analyses</h5>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% for analysis in analyses %}
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">Analysis #{{ analysis.id }}</h6>
+                            <small>{{ analysis.analysis_date.strftime('%Y-%m-%d') }}</small>
+                        </div>
+                        <p class="mb-1">
+                            Revenue: ${{ "{:,.2f}".format(analysis.projected_monthly_revenue or 0) }}/month
+                        </p>
+                        <small>
+                            Waste: {{ "{:,.1f}".format(analysis.total_waste_generation_kg_day or 0) }} kg/day
+                        </small>
+                    </a>
+                    {% endfor %}
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('zones.run_analysis', id=zone.id) }}" class="btn btn-sm btn-primary">
+                        <i class="bi bi-calculator"></i> Run New Analysis
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<!-- Leaflet JavaScript -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    var map;
+    var zoneLayer;
+    
+    function initMap() {
+        console.log('=== STARTING ZONE MAP INITIALIZATION ===');
+        console.log('Initializing Leaflet map for zone {{ zone.id }}');
+        console.log('Zone name: {{ zone.name }}');
+        console.log('Leaflet loaded:', typeof L !== 'undefined');
+        
+        // Check if map container exists
+        var mapContainer = document.getElementById('map');
+        console.log('Map container found:', mapContainer !== null);
+        if (!mapContainer) {
+            console.error('Map container element not found!');
+            return;
+        }
+        
+        // Check container size
+        var rect = mapContainer.getBoundingClientRect();
+        console.log('Map container size:', rect.width + 'x' + rect.height);
+        
+        try {
+            // Get center coordinates
+            {% if zone.centroid and zone.centroid.coordinates %}
+            var center = [{{ zone.centroid.coordinates[1] }}, {{ zone.centroid.coordinates[0] }}];
+            console.log('Using zone centroid:', center);
+            {% else %}
+            var center = [-15.4166, 28.2833]; // Default to Lusaka
+            console.log('Using default center:', center);
+            {% endif %}
+            
+            // Initialize Leaflet map
+            map = L.map('map').setView(center, 16);
+            console.log('Leaflet map initialized');
+            
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            }).addTo(map);
+            console.log('Tile layer added');
+
+            {% if zone.geometry %}
+            // Get zone geometry
+            var zoneGeometry = {{ zone.geometry | tojson | safe }};
+            console.log('Zone geometry:', zoneGeometry);
+            console.log('Zone geometry type:', typeof zoneGeometry);
+            
+            // Validate geometry structure
+            if (!zoneGeometry || !zoneGeometry.coordinates) {
+                console.error('Invalid geometry structure:', zoneGeometry);
+                throw new Error('Invalid geometry structure: missing coordinates');
+            }
+            
+            if (!Array.isArray(zoneGeometry.coordinates) || zoneGeometry.coordinates.length === 0) {
+                console.error('Invalid coordinates array:', zoneGeometry.coordinates);
+                throw new Error('Invalid geometry structure: empty coordinates');
+            }
+            
+            // Create GeoJSON feature
+            var zoneGeoJSON = {
+                'type': 'Feature',
+                'properties': {
+                    'name': '{{ zone.name }}',
+                    'code': '{{ zone.code }}',
+                    'zone_type': '{{ zone.zone_type.value }}',
+                    'area_sqm': {{ zone.area_sqm or 0 }},
+                    'population': {{ zone.estimated_population or 0 }}
+                },
+                'geometry': zoneGeometry
+            };
+            console.log('Created GeoJSON feature:', zoneGeoJSON);
+            
+            // Add GeoJSON layer to map
+            zoneLayer = L.geoJSON(zoneGeoJSON, {
+                style: {
+                    fillColor: '#3388ff',
+                    weight: 2,
+                    opacity: 1,
+                    color: 'white',
+                    dashArray: '3',
+                    fillOpacity: 0.5
+                },
+                onEachFeature: function (feature, layer) {
+                    // Create popup content
+                    var popupContent = '<div class="zone-popup">' +
+                        '<h6><strong>' + feature.properties.name + '</strong></h6>' +
+                        '<p><strong>Code:</strong> ' + feature.properties.code + '</p>' +
+                        '<p><strong>Type:</strong> ' + feature.properties.zone_type + '</p>' +
+                        '<p><strong>Area:</strong> ' + (feature.properties.area_sqm / 1000000).toFixed(3) + ' km²</p>' +
+                        '<p><strong>Population:</strong> ' + feature.properties.population.toLocaleString() + '</p>' +
+                        '</div>';
+                    
+                    layer.bindPopup(popupContent);
+                }
+            }).addTo(map);
+            console.log('Zone layer added to map');
+            console.log('Zone layer bounds:', zoneLayer.getBounds());
+            
+            // Fit map bounds to the zone
+            try {
+                var bounds = zoneLayer.getBounds();
+                console.log('Fitting map to bounds:', bounds);
+                map.fitBounds(bounds, {
+                    padding: [20, 20]
+                });
+                console.log('Map bounds fitted to zone');
+            } catch (boundsError) {
+                console.error('Error fitting bounds:', boundsError);
+                // Fallback to default zoom
+                map.setView(center, 16);
+            }
+            
+            {% else %}
+            console.warn('Zone has no geometry data');
+            // Show message on map
+            var noGeometryMessage = L.popup()
+                .setLatLng(center)
+                .setContent('<div style="text-align: center;"><strong>No Zone Geometry</strong><br>This zone has no spatial data to display.</div>')
+                .openOn(map);
+            {% endif %}
+            
+        } catch (error) {
+            console.error('Error initializing map:', error);
+            console.error('Error stack:', error.stack);
+            
+            // Show error message on map
+            var errorDiv = document.getElementById('map');
+            if (errorDiv) {
+                errorDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: red; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;">' +
+                    '<i class="bi bi-exclamation-triangle"></i><br>' +
+                    '<strong>Map Error</strong><br>' +
+                    'Unable to display zone map: ' + error.message + '<br>' +
+                    '<small>Check browser console for details</small>' +
+                    '</div>';
+            }
+            
+            // Also show alert to user
+            alert('Map initialization failed: ' + error.message + '\\nCheck browser console for details.');
+        }
+    }
+    
+    // Initialize map when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOM loaded, about to initialize map...');
+        // Add a small delay to ensure everything is loaded
+        setTimeout(function() {
+            initMap();
+        }, 100);
+    });
+</script>
+
+<style>
+.zone-popup {
+    min-width: 200px;
+}
+.zone-popup h6 {
+    margin-bottom: 8px;
+    color: #0066cc;
+}
+.zone-popup p {
+    margin: 4px 0;
+    font-size: 0.9rem;
+}
+</style>
+{% endblock %}

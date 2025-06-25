@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block title %}Zones{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col">
+            <h1>Zones</h1>
+        </div>
+        <div class="col-auto">
+            {% if current_user.can_edit_zones() %}
+                <a href="{{ url_for('zones.create') }}" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Create Zone
+                </a>
+                <a href="{{ url_for('zones.upload_csv') }}" class="btn btn-success">
+                    <i class="bi bi-upload"></i> Upload CSV
+                </a>
+            {% endif %}
+            <a href="{{ url_for('zones.map_view') }}" class="btn btn-info">
+                <i class="bi bi-map"></i> Map View
+            </a>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-4">
+                    <input type="text" name="search" class="form-control" 
+                           placeholder="Search by name or code..." 
+                           value="{{ request.args.get('search', '') }}">
+                </div>
+                <div class="col-md-3">
+                    <select name="type" class="form-select">
+                        <option value="">All Types</option>
+                        <option value="residential" {% if request.args.get('type') == 'residential' %}selected{% endif %}>Residential</option>
+                        <option value="commercial" {% if request.args.get('type') == 'commercial' %}selected{% endif %}>Commercial</option>
+                        <option value="industrial" {% if request.args.get('type') == 'industrial' %}selected{% endif %}>Industrial</option>
+                        <option value="institutional" {% if request.args.get('type') == 'institutional' %}selected{% endif %}>Institutional</option>
+                        <option value="mixed_use" {% if request.args.get('type') == 'mixed_use' %}selected{% endif %}>Mixed Use</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select name="status" class="form-select">
+                        <option value="">All Status</option>
+                        <option value="draft" {% if request.args.get('status') == 'draft' %}selected{% endif %}>Draft</option>
+                        <option value="active" {% if request.args.get('status') == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if request.args.get('status') == 'inactive' %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">Filter</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Zones Table -->
+    <div class="card">
+        <div class="card-body">
+            {% if zones.items %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Code</th>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Area (km²)</th>
+                                <th>Population</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for zone in zones.items %}
+                            <tr>
+                                <td>{{ zone.code }}</td>
+                                <td>{{ zone.name }}</td>
+                                <td>
+                                    <span class="badge bg-primary">{{ zone.zone_type.value|title }}</span>
+                                </td>
+                                <td>
+                                    {% if zone.status.value == 'active' %}
+                                        <span class="badge bg-success">Active</span>
+                                    {% elif zone.status.value == 'draft' %}
+                                        <span class="badge bg-warning">Draft</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ zone.status.value|title }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if zone.area_sqm and zone.area_sqm > 0 %}
+                                        {{ "{:,.3f}".format(zone.area_sqm / 1000000) }}
+                                    {% else %}
+                                        0.000
+                                    {% endif %}
+                                </td>
+                                <td>{{ "{:,}".format(zone.estimated_population or 0) }}</td>
+                                <td>{{ zone.created_at.strftime('%Y-%m-%d') }}</td>
+                                <td>
+                                    <a href="{{ url_for('zones.view', id=zone.id) }}" class="btn btn-sm btn-info">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    {% if current_user.can_edit_zones() %}
+                                        <a href="{{ url_for('zones.edit', id=zone.id) }}" class="btn btn-sm btn-primary">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                    {% endif %}
+                                    {% if current_user.can_delete_zones() %}
+                                        <button class="btn btn-sm btn-danger" onclick="confirmDelete(event, {{ zone.id }})">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                <nav aria-label="Page navigation">
+                    <ul class="pagination justify-content-center">
+                        {% if zones.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('zones.list', page=zones.prev_num, **request.args) }}">Previous</a>
+                            </li>
+                        {% endif %}
+                        
+                        {% for page_num in zones.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+                            {% if page_num %}
+                                <li class="page-item {% if page_num == zones.page %}active{% endif %}">
+                                    <a class="page-link" href="{{ url_for('zones.list', page=page_num, **request.args) }}">{{ page_num }}</a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled"><span class="page-link">...</span></li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if zones.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('zones.list', page=zones.next_num, **request.args) }}">Next</a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            {% else %}
+                <p class="text-center text-muted">No zones found. Create your first zone to get started.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function confirmDelete(event, zoneId) {
+    console.log('Delete button clicked for zone ID:', zoneId);
+    
+    // Get zone details for the confirmation
+    const row = event.target.closest('tr');
+    if (!row) {
+        console.error('Could not find table row');
+        alert('Error: Could not find zone information');
+        return;
+    }
+    
+    const zoneName = row.querySelector('td:nth-child(2)').textContent.trim();
+    const zoneCode = row.querySelector('td:nth-child(1)').textContent.trim();
+    
+    console.log('Zone details:', { zoneName, zoneCode, zoneId });
+    
+    // First warning
+    const firstConfirm = confirm(
+        `⚠️ WARNING: You are about to delete zone "${zoneName}" (${zoneCode}).\n\n` +
+        `This will permanently remove:\n` +
+        `• Zone boundaries and geometry data\n` +
+        `• Population and demographic information\n` +
+        `• All associated analysis data\n` +
+        `• Collection route information\n\n` +
+        `Are you sure you want to continue?`
+    );
+    
+    if (!firstConfirm) {
+        return; // User cancelled
+    }
+    
+    // Second warning (final confirmation)
+    const secondConfirm = confirm(
+        `🚨 FINAL WARNING: This action CANNOT be undone!\n\n` +
+        `Zone "${zoneName}" and ALL its data will be permanently deleted.\n\n` +
+        `Type the zone name to confirm deletion:\n` +
+        `Expected: "${zoneName}"\n\n` +
+        `Click OK to proceed with deletion, or Cancel to abort.`
+    );
+    
+    if (!secondConfirm) {
+        return; // User cancelled
+    }
+    
+    // Additional verification - ask user to type zone name
+    const typedName = prompt(
+        `Final verification required.\n\n` +
+        `Please type the exact zone name to confirm deletion:\n\n` +
+        `Zone name: "${zoneName}"`
+    );
+    
+    if (typedName !== zoneName) {
+        alert('❌ Zone name does not match. Deletion cancelled for safety.');
+        return;
+    }
+    
+    // Show loading indicator
+    const deleteButton = event.target.closest('button');
+    const originalContent = deleteButton.innerHTML;
+    deleteButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    deleteButton.disabled = true;
+    
+    // Proceed with deletion
+    fetch(`/zones/${zoneId}/delete-ajax`, {
+        method: 'POST',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/json'
+        }
+    }).then(response => {
+        return response.json().then(data => ({
+            status: response.status,
+            ok: response.ok,
+            data: data
+        }));
+    }).then(({status, ok, data}) => {
+        if (ok && data.success) {
+            // Show success message and reload
+            alert('✅ Zone deleted successfully.');
+            window.location.reload();
+        } else {
+            // Handle error
+            const errorMessage = data.error || 'Unknown error occurred';
+            alert(`❌ Error deleting zone: ${errorMessage}`);
+            // Restore button
+            deleteButton.innerHTML = originalContent;
+            deleteButton.disabled = false;
+        }
+    }).catch(error => {
+        alert(`❌ Network error: ${error.message}`);
+        // Restore button
+        deleteButton.innerHTML = originalContent;
+        deleteButton.disabled = false;
+    });
+}
+</script>
+{% endblock %}

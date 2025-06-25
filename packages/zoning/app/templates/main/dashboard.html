@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - {{ super() }}{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Dashboard Map Section -->
+    <div class="dashboard-map-section">
+        <div class="map-header">
+            <h2 class="map-title">
+                <i class="fas fa-map-marked-alt"></i>
+                Zone Overview Map
+            </h2>
+            <div class="map-actions">
+                {% if current_user.can_edit_zones() %}
+                <a href="{{ url_for('zones.create') }}" class="btn btn-primary btn-sm">
+                    <i class="fas fa-plus-circle"></i> Create Zone
+                </a>
+                <a href="{{ url_for('zones.upload_csv') }}" class="btn btn-secondary btn-sm">
+                    <i class="fas fa-file-csv"></i> Upload CSV
+                </a>
+                {% endif %}
+                <a href="{{ url_for('zones.map_view') }}" class="btn btn-accent btn-sm">
+                    <i class="fas fa-expand"></i> Full Map
+                </a>
+            </div>
+        </div>
+        <div class="dashboard-map-container">
+            <div id="dashboard-map"></div>
+            <div class="map-legend">
+                <div class="legend-item">
+                    <div class="legend-color residential"></div>
+                    <span>Residential</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color commercial"></div>
+                    <span>Commercial</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color industrial"></div>
+                    <span>Industrial</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color mixed"></div>
+                    <span>Mixed Use</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Key Metrics Grid -->
+    <div class="metrics-grid">
+        <div class="metric-card primary">
+            <div class="metric-icon">
+                <i class="fas fa-draw-polygon"></i>
+            </div>
+            <div class="metric-content">
+                <div class="metric-value">{{ total_zones }}</div>
+                <div class="metric-label">Total Zones</div>
+                <div class="metric-subtitle">{{ active_zones }} active zones</div>
+            </div>
+        </div>
+        
+        <div class="metric-card success">
+            <div class="metric-icon">
+                <i class="fas fa-expand-arrows-alt"></i>
+            </div>
+            <div class="metric-content">
+                <div class="metric-value">{{ "%.1f"|format(total_area / 1000000) }}</div>
+                <div class="metric-label">Coverage Area</div>
+                <div class="metric-subtitle">square kilometers</div>
+            </div>
+        </div>
+        
+        <div class="metric-card info">
+            <div class="metric-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <div class="metric-content">
+                <div class="metric-value">{{ "{:,.0f}".format(total_population) }}</div>
+                <div class="metric-label">Population Served</div>
+                <div class="metric-subtitle">estimated residents</div>
+            </div>
+        </div>
+        
+        <div class="metric-card warning">
+            <div class="metric-icon">
+                <i class="fas fa-trash-alt"></i>
+            </div>
+            <div class="metric-content">
+                <div class="metric-value">{{ "%.1f"|format((total_population or 0) * 0.5 / 1000) }}</div>
+                <div class="metric-label">Daily Waste</div>
+                <div class="metric-subtitle">tons per day</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Content Grid -->
+    <div class="content-grid">
+        <!-- Recent Activity Card -->
+        <div class="activity-card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <i class="fas fa-clock"></i>
+                    Recent Zones
+                </h3>
+            </div>
+            <div class="card-content">
+                {% if recent_zones %}
+                <div class="activity-list">
+                    {% for zone in recent_zones %}
+                    <a href="{{ url_for('zones.view', id=zone.id) }}" class="activity-item">
+                        <div class="activity-info">
+                            <h4 class="activity-title">{{ zone.name }}</h4>
+                            <p class="activity-meta">Created {{ zone.created_at.strftime('%B %d, %Y') }}</p>
+                        </div>
+                        <div class="activity-badges">
+                            <span class="status-badge {{ zone.zone_type.value if zone.zone_type else 'unknown' }}">{{ zone.zone_type.value if zone.zone_type else 'Unknown' }}</span>
+                            <span class="status-badge {{ zone.status.value if zone.status else 'unknown' }}">{{ zone.status.value if zone.status else 'Unknown' }}</span>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <i class="fas fa-inbox"></i>
+                    <p>No zones created yet</p>
+                    {% if current_user.can_edit_zones() %}
+                    <a href="{{ url_for('zones.create') }}" class="btn btn-primary btn-sm">Create First Zone</a>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Import Activity Card -->
+        <div class="activity-card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <i class="fas fa-file-import"></i>
+                    Recent Imports
+                </h3>
+            </div>
+            <div class="card-content">
+                {% if recent_imports %}
+                <div class="activity-list">
+                    {% for import in recent_imports %}
+                    <div class="activity-item">
+                        <div class="activity-info">
+                            <h4 class="activity-title">{{ import.original_filename or import.filename }}</h4>
+                            <p class="activity-meta">{{ import.zones_created }} zones • {{ import.uploaded_at.strftime('%B %d, %Y') }}</p>
+                        </div>
+                        <div class="activity-badges">
+                            <span class="status-badge {{ 'success' if import.status.value == 'completed' else 'warning' }}">
+                                {{ import.status.value }}
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <i class="fas fa-file-csv"></i>
+                    <p>No CSV imports yet</p>
+                    {% if current_user.can_edit_zones() %}
+                    <a href="{{ url_for('zones.upload_csv') }}" class="btn btn-secondary btn-sm">Upload CSV</a>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Quick Actions Card -->
+        <div class="actions-card full-width">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <i class="fas fa-bolt"></i>
+                    Quick Actions
+                </h3>
+            </div>
+            <div class="card-content">
+                <div class="action-grid">
+                    {% if current_user.can_edit_zones() %}
+                    <a href="{{ url_for('zones.create') }}" class="action-item primary">
+                        <div class="action-icon">
+                            <i class="fas fa-plus-circle"></i>
+                        </div>
+                        <div class="action-content">
+                            <h4>Create Zone</h4>
+                            <p>Draw new zones on the interactive map</p>
+                        </div>
+                    </a>
+                    <a href="{{ url_for('zones.upload_csv') }}" class="action-item secondary">
+                        <div class="action-icon">
+                            <i class="fas fa-file-csv"></i>
+                        </div>
+                        <div class="action-content">
+                            <h4>Upload CSV</h4>
+                            <p>Import zones from CSV file</p>
+                        </div>
+                    </a>
+                    <a href="{{ url_for('zones.create') }}" class="action-item success">
+                        <div class="action-icon">
+                            <i class="fas fa-magic"></i>
+                        </div>
+                        <div class="action-content">
+                            <h4>Create with Analytics</h4>
+                            <p>Draw zones with real-time analytics</p>
+                        </div>
+                    </a>
+                    {% endif %}
+                    <a href="{{ url_for('zones.map_view') }}" class="action-item accent">
+                        <div class="action-icon">
+                            <i class="fas fa-map"></i>
+                        </div>
+                        <div class="action-content">
+                            <h4>View Map</h4>
+                            <p>Explore zones on interactive map</p>
+                        </div>
+                    </a>
+                    <a href="{{ url_for('main.analysis') }}" class="action-item info">
+                        <div class="action-icon">
+                            <i class="fas fa-chart-bar"></i>
+                        </div>
+                        <div class="action-content">
+                            <h4>Analytics</h4>
+                            <p>View detailed zone analytics</p>
+                        </div>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* jshint ignore:start */
+/* eslint-disable */
+var dashboardMap;
+
+function generateUniqueColor(baseColor, zoneId) {
+    // Convert hex to RGB
+    var r = parseInt(baseColor.slice(1, 3), 16);
+    var g = parseInt(baseColor.slice(3, 5), 16);
+    var b = parseInt(baseColor.slice(5, 7), 16);
+    
+    // Create variations based on zone ID
+    var variation = (zoneId * 37) % 100; // Use prime number for better distribution
+    var factor = 0.7 + (variation / 100) * 0.6; // Range from 0.7 to 1.3
+    
+    // Apply variation while keeping colors reasonable
+    r = Math.min(255, Math.max(50, Math.round(r * factor)));
+    g = Math.min(255, Math.max(50, Math.round(g * factor)));
+    b = Math.min(255, Math.max(50, Math.round(b * factor)));
+    
+    // Convert back to hex
+    return '#' + 
+        r.toString(16).padStart(2, '0') + 
+        g.toString(16).padStart(2, '0') + 
+        b.toString(16).padStart(2, '0');
+}
+
+function initMap() {
+    try {
+        // Initialize the dashboard map
+        var mapZoom = parseInt('{% if config.DEFAULT_MAP_ZOOM %}{{ config.DEFAULT_MAP_ZOOM }}{% else %}11{% endif %}');
+        var mapCenter = {
+            lat: parseFloat('{% if config.DEFAULT_MAP_CENTER %}{{ config.DEFAULT_MAP_CENTER.lat }}{% else %}-15.4166{% endif %}'),
+            lng: parseFloat('{% if config.DEFAULT_MAP_CENTER %}{{ config.DEFAULT_MAP_CENTER.lng }}{% else %}28.2833{% endif %}')
+        };
+        
+        dashboardMap = new google.maps.Map(document.getElementById('dashboard-map'), {
+            zoom: mapZoom,
+            center: mapCenter,
+            mapTypeId: 'roadmap'
+        });
+    } catch (error) {
+        console.error('Error initializing Google Maps:', error);
+        showMapMessage('Error loading map. Please check your internet connection.', 'error');
+        return;
+    }
+
+    // Zone type colors matching the legend
+    var zoneColors = {
+        'RESIDENTIAL': '#9CB071',
+        'COMMERCIAL': '#a2bd83', 
+        'INDUSTRIAL': '#78807a',
+        'MIXED_USE': '#b9cea2',
+        'GREEN_SPACE': '#9CB071',
+        'INSTITUTIONAL': '#b9cea2'
+    };
+
+    // Load zones data from server
+    var zonesData = {{ zones | tojson }};
+    console.log('Loaded zones data:', zonesData);
+    
+    if (zonesData && zonesData.length > 0) {
+        // Create a bounds object to fit all zones
+        var bounds = new google.maps.LatLngBounds();
+        
+        zonesData.forEach(function(zone) {
+            if (zone.geometry && zone.geometry.coordinates) {
+                try {
+                    // Create GeoJSON feature for this zone
+                    var feature = {
+                        type: 'Feature',
+                        geometry: zone.geometry,
+                        properties: {
+                            id: zone.id,
+                            name: zone.name,
+                            zone_type: zone.zone_type,
+                            status: zone.status,
+                            area_sqm: zone.area_sqm,
+                            population: zone.estimated_population
+                        }
+                    };
+                    
+                    // Add the feature to the map data layer
+                    var dataFeature = dashboardMap.data.addGeoJson(feature)[0];
+                    
+                    // Extend bounds with this feature
+                    dashboardMap.data.forEach(function(feature) {
+                        feature.getGeometry().forEachLatLng(function(latLng) {
+                            bounds.extend(latLng);
+                        });
+                    });
+                    
+                } catch (error) {
+                    console.error('Error rendering zone:', zone.name, error);
+                }
+            }
+        });
+
+        // Style the zones with unique colors for each zone
+        dashboardMap.data.setStyle(function(feature) {
+            var zoneType = feature.getProperty('zone_type');
+            var zoneId = feature.getProperty('id');
+            
+            // Generate different shades based on zone ID for better distinction
+            var baseColor = zoneColors[zoneType] || '#9CB071';
+            var uniqueColor = generateUniqueColor(baseColor, zoneId);
+            
+            return {
+                fillColor: uniqueColor,
+                strokeWeight: 2,
+                strokeColor: '#ffffff',
+                fillOpacity: 0.4,
+                strokeOpacity: 0.9
+            };
+        });
+
+        // Add click listener for zone popups
+        dashboardMap.data.addListener('click', function(event) {
+            showZoneInfo(event);
+        });
+
+        // Add hover effects
+        dashboardMap.data.addListener('mouseover', function(event) {
+            dashboardMap.data.revertStyle();
+            dashboardMap.data.overrideStyle(event.feature, {
+                strokeWeight: 4,
+                fillOpacity: 0.5
+            });
+        });
+
+        dashboardMap.data.addListener('mouseout', function(event) {
+            dashboardMap.data.revertStyle();
+        });
+
+        // Fit map to show all zones
+        if (!bounds.isEmpty()) {
+            dashboardMap.fitBounds(bounds);
+        }
+    } else {
+        // Show no zones message
+        showMapMessage('No zones created yet', 'info');
+    }
+}
+
+function showZoneInfo(event) {
+    var feature = event.feature;
+    var properties = {
+        id: feature.getProperty('id'),
+        name: feature.getProperty('name'),
+        zone_type: feature.getProperty('zone_type'),
+        status: feature.getProperty('status'),
+        area_sqm: feature.getProperty('area_sqm'),
+        population: feature.getProperty('population')
+    };
+
+    var content = `
+        <div class="zone-popup">
+            <h5>${properties.name}</h5>
+            <p><strong>Type:</strong> ${properties.zone_type}</p>
+            <p><strong>Status:</strong> ${properties.status}</p>
+            <p><strong>Area:</strong> ${((properties.area_sqm || 0) / 1000000).toFixed(2)} km²</p>
+            ${properties.population ? `<p><strong>Population:</strong> ${properties.population.toLocaleString()}</p>` : ''}
+            <a href="/zones/${properties.id}" class="btn btn-primary btn-sm mt-2">
+                <i class="fas fa-eye"></i> View Details
+            </a>
+        </div>
+    `;
+
+    var infoWindow = new google.maps.InfoWindow({
+        content: content,
+        position: event.latLng
+    });
+
+    infoWindow.open(dashboardMap);
+}
+
+function showMapMessage(message, type) {
+    var content = '';
+    if (type === 'error') {
+        content = `
+            <div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; border: 1px solid #f5c6cb; margin: 10px;">
+                <i class="fas fa-exclamation-triangle"></i> ${message}
+            </div>
+        `;
+    } else {
+        content = `
+            <div style="background: white; padding: 10px; border-radius: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 10px;">
+                <i class="fas fa-info-circle text-muted"></i> ${message}
+            </div>
+        `;
+    }
+    
+    var infoWindow = new google.maps.InfoWindow({
+        content: content,
+        position: dashboardMap.getCenter()
+    });
+
+    infoWindow.open(dashboardMap);
+}
+</script>
+{% if config.GOOGLE_MAPS_API_KEY %}
+<script async defer src="https://maps.googleapis.com/maps/api/js?key={{ config.GOOGLE_MAPS_API_KEY }}&callback=initMap"></script>
+{% else %}
+<script>
+// Fallback when Google Maps API key is not available
+function initMap() {
+    var mapContainer = document.getElementById('dashboard-map');
+    if (mapContainer) {
+        mapContainer.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f8f9fa; color: #6c757d; font-size: 14px;"><div><i class="fas fa-map-marked-alt" style="font-size: 24px; margin-bottom: 10px;"></i><br>Google Maps API key not configured</div></div>';
+    }
+}
+// Initialize immediately if no API key
+document.addEventListener('DOMContentLoaded', initMap);
+</script>
+{% endif %}
+{% endblock %}

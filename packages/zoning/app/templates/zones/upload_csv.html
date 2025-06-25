@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Upload CSV - {{ super() }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .format-example {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        font-family: monospace;
+        font-size: 0.9em;
+        white-space: pre-wrap;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mb-4">
+        <i class="fas fa-file-csv"></i> Upload CSV Zone Data
+    </h1>
+    
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-body">
+                    <form method="POST" enctype="multipart/form-data" id="csv-upload-form">
+                        {{ form.hidden_tag() }}
+                        
+                        <!-- File Upload Area -->
+                        <div class="mb-4">
+                            <label class="form-label">{{ form.csv_file.label }}</label>
+                            <div class="upload-area" id="upload-area">
+                                <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                                <h5>Drag & Drop CSV File Here</h5>
+                                <p class="text-muted">or click to browse</p>
+                                {{ form.csv_file(class="d-none", accept=".csv,.txt") }}
+                            </div>
+                            {% if form.csv_file.errors %}
+                            <div class="text-danger mt-2">
+                                {% for error in form.csv_file.errors %}{{ error }}{% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- CSV Format Selection -->
+                        <div class="mb-3">
+                            {{ form.csv_format.label(class="form-label") }}
+                            {{ form.csv_format(class="form-select", onchange="updateFormatExample()") }}
+                            <small class="form-text text-muted">
+                                Select the format that matches your CSV file structure
+                            </small>
+                        </div>
+                        
+                        <!-- Additional Options -->
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                {{ form.name_prefix.label(class="form-label") }}
+                                {{ form.name_prefix(class="form-control", placeholder="e.g., Lusaka_Zone") }}
+                                <small class="form-text text-muted">
+                                    {{ form.name_prefix.description }}
+                                </small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                {{ form.default_zone_type.label(class="form-label") }}
+                                {{ form.default_zone_type(class="form-select") }}
+                                <small class="form-text text-muted">
+                                    {{ form.default_zone_type.description }}
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <!-- Validation Options -->
+                        <div class="mb-3">
+                            <div class="form-check">
+                                {{ form.validate_coordinates(class="form-check-input") }}
+                                {{ form.validate_coordinates.label(class="form-check-label") }}
+                            </div>
+                            <div class="form-check">
+                                {{ form.create_as_draft(class="form-check-input") }}
+                                {{ form.create_as_draft.label(class="form-check-label") }}
+                            </div>
+                        </div>
+                        
+                        <!-- Note: Submit buttons removed - CSV processing now happens via JavaScript -->
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <!-- Format Examples -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">CSV Format Example</h5>
+                </div>
+                <div class="card-body">
+                    <div id="format-example" class="format-example">
+                        <!-- Example will be inserted by JavaScript -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Instructions -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-info-circle"></i> Instructions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <ol class="mb-3">
+                        <li><strong>Prepare your CSV file</strong> with coordinates in WGS84 format</li>
+                        <li><strong>Drag & drop</strong> your CSV file into the upload area</li>
+                        <li><strong>Click "Load Coordinates on Map"</strong> to visualize and create your zone</li>
+                        <li><strong>Flexible column names:</strong> Works with longitude, lon, lng, long, or x</li>
+                        <li><strong>Flexible column names:</strong> Works with latitude, lat, or y</li>
+                        <li><strong>Minimum requirements:</strong> At least 3 unique coordinates</li>
+                        <li><strong>Use decimal degrees</strong> (e.g., 28.2833, -15.4167)</li>
+                    </ol>
+                    
+                    <div class="alert alert-success mb-4">
+                        <h6><i class="fas fa-magic"></i> How It Works:</h6>
+                        <ul class="mb-0">
+                            <li><strong>Instant Processing:</strong> CSV is parsed directly in your browser</li>
+                            <li><strong>Visual Feedback:</strong> See your zone boundaries immediately on the map</li>
+                            <li><strong>Smart Detection:</strong> Automatically finds coordinate columns</li>
+                            <li><strong>Auto-closing:</strong> Polygons are closed automatically if needed</li>
+                            <li><strong>Direct to Map:</strong> No server upload needed - faster and more reliable</li>
+                        </ul>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Coordinate Bounds for Lusaka:</h6>
+                    <ul class="small mb-0">
+                        <li>Longitude: 27.5° to 29.0°</li>
+                        <li>Latitude: -16.0° to -14.5°</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">CSV Format Examples:</label>
+                <div class="btn-group d-block mb-2" role="group">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="showExample('simple')">
+                        Simple (lon/lat)
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="showExample('simple_alt')">
+                        Simple (longitude/latitude)
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showExample('with_metadata')">
+                        With Metadata
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showExample('multi_zone')">
+                        Multi-Zone
+                    </button>
+                </div>
+                <pre id="csv-example" class="bg-light p-3 border rounded"><code id="csv-example-code">lon,lat
+28.2816,-15.3875
+28.2820,-15.3870
+28.2825,-15.3875
+28.2820,-15.3880</code></pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// CSV format examples
+const formatExamples = {
+    'simple': `lon,lat
+28.2816,-15.3875
+28.2820,-15.3870
+28.2825,-15.3875
+28.2820,-15.3880`,
+    
+    'simple_alt': `longitude,latitude
+28.2816,-15.3875
+28.2820,-15.3870
+28.2825,-15.3875
+28.2820,-15.3880`,
+    
+    'with_metadata': `longitude,latitude,zone_name,zone_type,description
+28.2816,-15.3875,Lusaka_Central,commercial,Main business district
+28.2820,-15.3870,Lusaka_Central,commercial,Main business district
+28.2825,-15.3875,Lusaka_Central,commercial,Main business district
+28.2820,-15.3880,Lusaka_Central,commercial,Main business district
+28.2816,-15.3875,Lusaka_Central,commercial,Main business district`,
+    
+    'multi_zone': `zone_id,longitude,latitude,zone_name,zone_type
+zone_1,28.2816,-15.3875,Residential_A,residential
+zone_1,28.2820,-15.3870,Residential_A,residential
+zone_1,28.2825,-15.3875,Residential_A,residential
+zone_1,28.2820,-15.3880,Residential_A,residential
+zone_1,28.2816,-15.3875,Residential_A,residential
+zone_2,28.3000,-15.4000,Commercial_B,commercial
+zone_2,28.3005,-15.3995,Commercial_B,commercial
+zone_2,28.3010,-15.4000,Commercial_B,commercial
+zone_2,28.3005,-15.4005,Commercial_B,commercial
+zone_2,28.3000,-15.4000,Commercial_B,commercial`
+};
+
+function updateFormatExample() {
+    const format = document.getElementById('csv_format').value;
+    const exampleDiv = document.getElementById('format-example');
+    exampleDiv.textContent = formatExamples[format] || '';
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateFormatExample();
+    LusakaZoning.initializeCSVUpload();
+});
+
+// Show example for selected format
+function showExample(format) {
+    const examples = {
+        'simple': `lon,lat
+28.2816,-15.3875
+28.2820,-15.3870
+28.2825,-15.3875
+28.2820,-15.3880`,
+        
+        'simple_alt': `longitude,latitude
+28.2816,-15.3875
+28.2820,-15.3870
+28.2825,-15.3875
+28.2820,-15.3880`,
+        
+        'with_metadata': `longitude,latitude,zone_name,zone_type,description
+28.2816,-15.3875,"Residential Area A",residential,"Main residential zone"
+28.2820,-15.3870,"Residential Area A",residential,"Main residential zone"
+28.2825,-15.3875,"Residential Area A",residential,"Main residential zone"
+28.2820,-15.3880,"Residential Area A",residential,"Main residential zone"`,
+        
+        'multi_zone': `zone_id,lon,lat
+1,28.2816,-15.3875
+1,28.2820,-15.3870
+1,28.2825,-15.3875
+1,28.2820,-15.3880
+2,28.2850,-15.3900
+2,28.2855,-15.3895
+2,28.2860,-15.3905
+2,28.2855,-15.3910`
+    };
+    
+    const exampleCode = document.getElementById('csv-example-code');
+    if (exampleCode && examples[format]) {
+        exampleCode.textContent = examples[format];
+    }
+    
+    // Update button states
+    document.querySelectorAll('.btn-group .btn').forEach(btn => {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline-primary');
+    });
+    
+    const activeButton = document.querySelector(`[onclick="showExample('${format}')"]`);
+    if (activeButton) {
+        activeButton.classList.remove('btn-outline-primary');
+        activeButton.classList.add('btn-primary');
+    }
+}
+</script>
+{% endblock %}

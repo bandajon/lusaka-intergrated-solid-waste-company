@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Zone - {{ zone.name }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <h1>Edit Zone</h1>
+            <p class="text-muted">Update zone information for {{ zone.name }}</p>
+
+            <form method="POST">
+                {{ form.hidden_tag() }}
+                
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Basic Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            {{ form.name.label(class="form-label") }}
+                            {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else "")) }}
+                            {% if form.name.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.name.errors %}{{ error }}{% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.code.label(class="form-label") }}
+                            {{ form.code(class="form-control" + (" is-invalid" if form.code.errors else ""), readonly=True) }}
+                            <div class="form-text">Zone codes cannot be changed</div>
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control", rows=3) }}
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                {{ form.zone_type.label(class="form-label") }}
+                                {{ form.zone_type(class="form-select" + (" is-invalid" if form.zone_type.errors else "")) }}
+                                {% if form.zone_type.errors %}
+                                    <div class="invalid-feedback">
+                                        {% for error in form.zone_type.errors %}{{ error }}{% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                {{ form.status.label(class="form-label") }}
+                                {{ form.status(class="form-select" + (" is-invalid" if form.status.errors else "")) }}
+                                {% if form.status.errors %}
+                                    <div class="invalid-feedback">
+                                        {% for error in form.status.errors %}{{ error }}{% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Population & Waste Management</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                {{ form.estimated_population.label(class="form-label") }}
+                                {{ form.estimated_population(class="form-control", type="number", min=0) }}
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                {{ form.household_count.label(class="form-label") }}
+                                {{ form.household_count(class="form-control", type="number", min=0) }}
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                {{ form.business_count.label(class="form-label") }}
+                                {{ form.business_count(class="form-control", type="number", min=0) }}
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                {{ form.collection_frequency_week.label(class="form-label") }}
+                                {{ form.collection_frequency_week(class="form-control", type="number", min=1, max=7) }}
+                                <div class="form-text">Number of collections per week (1-7)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('zones.view', id=zone.id) }}" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save"></i> Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

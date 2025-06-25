@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block title %}Analysis{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1>Waste Management Analysis</h1>
+        <p class="text-muted">Comprehensive analysis of waste generation patterns and zone performance</p>
+    </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Total Zones</h6>
+                <h3 class="card-title">{{ zones|length }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Total Waste (tons/day)</h6>
+                <h3 class="card-title">{{ "%.1f"|format(zones|sum(attribute='waste_generation_kg_day')/1000) }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Total Population</h6>
+                <h3 class="card-title">{{ "{:,}".format(zones|sum(attribute='estimated_population')) }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Collection Points</h6>
+                <h3 class="card-title">{{ zones|sum(attribute='collection_points_required') }}</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Section -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Waste Generation by Zone Type</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="wasteByTypeChart" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Top 10 Zones by Waste Generation</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="topZonesChart" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Population Density Map -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Population Density Heat Map</h5>
+            </div>
+            <div class="card-body">
+                <div id="densityMap" style="height: 500px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Zone Performance Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Zone Performance Metrics</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Zone Name</th>
+                                <th>Type</th>
+                                <th>Population</th>
+                                <th>Area (km²)</th>
+                                <th>Waste (kg/day)</th>
+                                <th>Collection Frequency</th>
+                                <th>Efficiency Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for zone in zones|sort(attribute='waste_generation_kg_day', reverse=True) %}
+                            {% if loop.index <= 20 %}
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('zones.view', id=zone.id) }}">
+                                        {{ zone.name }}
+                                    </a>
+                                </td>
+                                <td>{{ zone.zone_type.value }}</td>
+                                <td>{{ "{:,}".format(zone.estimated_population) }}</td>
+                                <td>{{ "%.2f"|format((zone.area_sqm or 0)/1000000) }}</td>
+                                <td>{{ "{:,.0f}".format(zone.waste_generation_kg_day) }}</td>
+                                <td>{{ zone.collection_frequency }}/week</td>
+                                <td>
+                                    {% set efficiency = (zone.waste_generation_kg_day / zone.estimated_population) if zone.estimated_population > 0 else 0 %}
+                                    <span class="badge badge-{{ 'success' if efficiency < 0.5 else 'warning' if efficiency < 1 else 'danger' }}">
+                                        {{ "%.2f"|format(efficiency) }} kg/person
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<script>
+// Waste by Type Chart
+const wasteByTypeCtx = document.getElementById('wasteByTypeChart').getContext('2d');
+const wasteByTypeData = {{ waste_by_type|tojson }};
+
+new Chart(wasteByTypeCtx, {
+    type: 'doughnut',
+    data: {
+        labels: Object.keys(wasteByTypeData),
+        datasets: [{
+            data: Object.values(wasteByTypeData),
+            backgroundColor: [
+                '#FF6384',
+                '#36A2EB',
+                '#FFCE56',
+                '#4BC0C0',
+                '#9966FF'
+            ]
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        const label = context.label || '';
+                        const value = context.parsed || 0;
+                        return label + ': ' + value.toFixed(0) + ' kg/day';
+                    }
+                }
+            }
+        }
+    }
+});
+
+// Top Zones Chart
+const topZonesCtx = document.getElementById('topZonesChart').getContext('2d');
+const topZones = {{ zones|sort(attribute='waste_generation_kg_day', reverse=True)|list|tojson }}.slice(0, 10);
+
+new Chart(topZonesCtx, {
+    type: 'bar',
+    data: {
+        labels: topZones.map(z => z.name),
+        datasets: [{
+            label: 'Waste Generation (kg/day)',
+            data: topZones.map(z => z.waste_generation_kg_day),
+            backgroundColor: '#36A2EB'
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true
+            }
+        }
+    }
+});
+
+// Population Density Map
+const map = L.map('densityMap').setView([-15.4166, 28.2833], 11);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+// Add heat map layer
+const zoneData = {{ zone_data|tojson }};
+const heatData = [];
+
+zoneData.forEach(zone => {
+    if (zone.geojson && zone.geojson.geometry) {
+        const coords = zone.geojson.geometry.coordinates[0];
+        // Get center point of polygon
+        let sumLat = 0, sumLng = 0;
+        coords.forEach(coord => {
+            sumLng += coord[0];
+            sumLat += coord[1];
+        });
+        const centerLat = sumLat / coords.length;
+        const centerLng = sumLng / coords.length;
+        
+        // Add heat point with intensity based on population density
+        heatData.push([centerLat, centerLng, zone.population_density]);
+    }
+});
+
+if (heatData.length > 0) {
+    L.heatLayer(heatData, {
+        radius: 25,
+        blur: 15,
+        maxZoom: 17,
+    }).addTo(map);
+}
+
+// Add zone polygons
+zoneData.forEach(zone => {
+    if (zone.geojson && zone.geojson.geometry) {
+        L.geoJSON(zone.geojson, {
+            style: {
+                fillColor: '#3388ff',
+                weight: 1,
+                opacity: 0.7,
+                color: 'white',
+                fillOpacity: 0.3
+            }
+        }).bindPopup(`
+            <strong>${zone.name}</strong><br>
+            Population Density: ${zone.population_density.toFixed(0)} per km²<br>
+            Waste Generation: ${zone.waste_generation.toFixed(0)} kg/day
+        `).addTo(map);
+    }
+});
+</script>
+{% endblock %}

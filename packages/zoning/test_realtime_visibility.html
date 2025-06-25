@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Real-time Analysis Visibility</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background: #f5f5f5;
+        }
+        .found {
+            color: green;
+            font-weight: bold;
+        }
+        .not-found {
+            color: red;
+            font-weight: bold;
+        }
+        #map-container {
+            position: relative;
+            height: 400px;
+            border: 2px solid blue;
+            background: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Real-time Analysis Panel Visibility Test</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Check if analysis panel exists</h2>
+        <p>Looking for element with id 'real-time-analysis-panel'...</p>
+        <p id="panel-check"></p>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Map container for reference</h2>
+        <div id="map-container">
+            <p>Map would be here</p>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: All elements with 'analysis' in ID or class</h2>
+        <ul id="analysis-elements"></ul>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 4: Panel visibility and position</h2>
+        <div id="panel-visibility"></div>
+    </div>
+
+    <script>
+        // Wait for page to load
+        window.addEventListener('load', function() {
+            // Test 1: Check for analysis panel
+            const panel = document.getElementById('real-time-analysis-panel');
+            const panelCheck = document.getElementById('panel-check');
+            
+            if (panel) {
+                panelCheck.innerHTML = '<span class="found">✓ Panel found!</span>';
+                
+                // Test 4: Check visibility
+                const visibilityDiv = document.getElementById('panel-visibility');
+                const computedStyle = window.getComputedStyle(panel);
+                const rect = panel.getBoundingClientRect();
+                
+                visibilityDiv.innerHTML = `
+                    <p><strong>Panel Details:</strong></p>
+                    <ul>
+                        <li>Display: ${computedStyle.display}</li>
+                        <li>Visibility: ${computedStyle.visibility}</li>
+                        <li>Position: ${computedStyle.position}</li>
+                        <li>Z-index: ${computedStyle.zIndex}</li>
+                        <li>Opacity: ${computedStyle.opacity}</li>
+                        <li>Dimensions: ${rect.width}x${rect.height}</li>
+                        <li>Location: top=${rect.top}, left=${rect.left}</li>
+                        <li>Parent element: ${panel.parentElement ? panel.parentElement.tagName : 'none'}</li>
+                    </ul>
+                `;
+            } else {
+                panelCheck.innerHTML = '<span class="not-found">✗ Panel not found</span>';
+            }
+            
+            // Test 3: Find all analysis-related elements
+            const allElements = document.querySelectorAll('*');
+            const analysisElements = [];
+            
+            allElements.forEach(el => {
+                if (el.id && el.id.toLowerCase().includes('analysis')) {
+                    analysisElements.push({type: 'ID', name: el.id, element: el});
+                }
+                if (el.className && el.className.toString().toLowerCase().includes('analysis')) {
+                    analysisElements.push({type: 'Class', name: el.className, element: el});
+                }
+            });
+            
+            const listEl = document.getElementById('analysis-elements');
+            if (analysisElements.length > 0) {
+                analysisElements.forEach(item => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `${item.type}: <strong>${item.name}</strong> (${item.element.tagName})`;
+                    listEl.appendChild(li);
+                });
+            } else {
+                listEl.innerHTML = '<li class="not-found">No analysis-related elements found</li>';
+            }
+        });
+    </script>
+</body>
+</html> 

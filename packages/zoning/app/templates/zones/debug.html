@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Zone Map Debug{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1>Zone Map Debug</h1>
+    <p>Debug information for zone: <strong>{{ zone.name }}</strong></p>
+    
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">Zone Data</div>
+                <div class="card-body">
+                    <pre id="zone-data">{{ zone_debug | tojson(indent=2) }}</pre>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">Debug Map</div>
+                <div class="card-body p-0">
+                    <div id="map" style="height: 400px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">Debug Log</div>
+        <div class="card-body">
+            <div id="debug-log" style="height: 300px; overflow-y: auto; background: #f8f9fa; padding: 10px; font-family: monospace;">
+                <!-- Debug messages will appear here -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<!-- Leaflet JavaScript -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    var debugLog = document.getElementById('debug-log');
+    var map;
+    
+    function log(message) {
+        console.log(message);
+        debugLog.innerHTML += new Date().toLocaleTimeString() + ': ' + message + '<br>';
+        debugLog.scrollTop = debugLog.scrollHeight;
+    }
+    
+    function initDebugMap() {
+        log('=== STARTING DEBUG MAP INITIALIZATION ===');
+        
+        try {
+            // Check Leaflet
+            log('Leaflet available: ' + (typeof L !== 'undefined'));
+            if (typeof L === 'undefined') {
+                throw new Error('Leaflet library not loaded');
+            }
+            
+            // Zone data
+            var zoneData = {{ zone_debug | tojson | safe }};
+            log('Zone data loaded: ' + JSON.stringify(zoneData, null, 2));
+            
+            {% if zone.centroid and zone.centroid.coordinates %}
+            var center = [{{ zone.centroid.coordinates[1] }}, {{ zone.centroid.coordinates[0] }}];
+            log('Using zone centroid: ' + JSON.stringify(center));
+            {% else %}
+            var center = [-15.4166, 28.2833];
+            log('Using default center: ' + JSON.stringify(center));
+            {% endif %}
+            
+            // Initialize map
+            log('Creating map...');
+            map = L.map('map').setView(center, 14);
+            log('Map created successfully');
+            
+            // Add tiles
+            log('Adding tile layer...');
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+            log('Tile layer added');
+            
+            {% if zone.geometry %}
+            // Zone geometry
+            var zoneGeometry = {{ zone.geometry | tojson | safe }};
+            log('Zone geometry: ' + JSON.stringify(zoneGeometry));
+            
+            // Validate geometry
+            if (!zoneGeometry || !zoneGeometry.coordinates) {
+                throw new Error('Invalid geometry structure');
+            }
+            log('Geometry validation passed');
+            
+            // Create GeoJSON
+            var geoJSON = {
+                'type': 'Feature',
+                'properties': {
+                    'name': '{{ zone.name }}',
+                    'code': '{{ zone.code }}'
+                },
+                'geometry': zoneGeometry
+            };
+            log('GeoJSON created: ' + JSON.stringify(geoJSON));
+            
+            // Add to map
+            var layer = L.geoJSON(geoJSON, {
+                style: {
+                    fillColor: '#ff0000',
+                    weight: 3,
+                    opacity: 1,
+                    color: '#ff0000',
+                    fillOpacity: 0.3
+                }
+            }).addTo(map);
+            log('Zone layer added to map');
+            
+            // Fit bounds
+            var bounds = layer.getBounds();
+            log('Layer bounds: ' + JSON.stringify(bounds));
+            map.fitBounds(bounds, { padding: [20, 20] });
+            log('Map fitted to bounds');
+            
+            {% else %}
+            log('WARNING: Zone has no geometry data');
+            {% endif %}
+            
+            log('=== MAP INITIALIZATION COMPLETE ===');
+            
+        } catch (error) {
+            log('ERROR: ' + error.message);
+            log('Stack trace: ' + error.stack);
+        }
+    }
+    
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        log('DOM loaded, starting map initialization...');
+        initDebugMap();
+    });
+</script>
+{% endblock %}

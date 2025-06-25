@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+
+{% block title %}Create Zone - Real-time Analytics{% endblock %}
+
+{% block head %}
+{{ super() }}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<!-- Leaflet Draw CSS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+<!-- Socket.IO for WebSocket support -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet Draw JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<!-- WebSocket client script -->
+<script src="{{ url_for('static', filename='js/websocket_client.js') }}"></script>
+<style>
+    .analytics-container {
+        margin-top: 20px;
+        padding: 20px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+    }
+    
+    .progress-item {
+        margin-bottom: 20px;
+        padding: 15px;
+        background-color: white;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .progress-item.completed {
+        border-left: 4px solid #28a745;
+    }
+    
+    .progress-item h4 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 16px;
+        color: #333;
+    }
+    
+    .progress {
+        height: 25px;
+        background-color: #e9ecef;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    
+    .progress-bar {
+        height: 100%;
+        background-color: #007bff;
+        color: white;
+        text-align: center;
+        line-height: 25px;
+        transition: width 0.3s ease;
+    }
+    
+    .progress-message {
+        display: block;
+        margin-top: 5px;
+        color: #6c757d;
+    }
+    
+    #analytics-status {
+        margin-bottom: 20px;
+        padding: 15px;
+        border-radius: 4px;
+    }
+    
+    .alert-info {
+        background-color: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+    
+    .alert-success {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    
+    .alert-warning {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+    }
+    
+    .alert-error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    
+    #analytics-results {
+        margin-top: 20px;
+    }
+    
+    .result-item {
+        padding: 10px;
+        margin-bottom: 10px;
+        background-color: white;
+        border-radius: 4px;
+        border-left: 3px solid #17a2b8;
+    }
+    
+    #analytics-summary {
+        margin-top: 20px;
+        padding: 20px;
+        background-color: white;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    #analytics-summary h3 {
+        margin-top: 0;
+        color: #333;
+    }
+    
+    #analytics-summary ul {
+        list-style-type: none;
+        padding-left: 0;
+    }
+    
+    #analytics-summary li {
+        padding: 5px 0;
+        border-bottom: 1px solid #e9ecef;
+    }
+    
+    #analytics-summary li:last-child {
+        border-bottom: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Create New Zone</h1>
+    
+    <!-- Zone Creation Form -->
+    <div class="row">
+        <div class="col-md-6">
+            <form id="zone-form" method="POST" action="{{ url_for('zones.create') }}">
+                {{ form.hidden_tag() }}
+                
+                <div class="form-group">
+                    {{ form.name.label }}
+                    {{ form.name(class="form-control") }}
+                    {% if form.name.errors %}
+                        <div class="text-danger">
+                            {% for error in form.name.errors %}
+                                <small>{{ error }}</small>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="form-group">
+                    {{ form.description.label }}
+                    {{ form.description(class="form-control", rows=3) }}
+                </div>
+                
+                <div class="form-group">
+                    <label>Zone Boundary</label>
+                    <div id="map" style="height: 400px;"></div>
+                    <input type="hidden" id="geometry" name="geometry" />
+                </div>
+                
+                <button type="submit" class="btn btn-primary" id="create-btn">
+                    Create Zone & Start Analysis
+                </button>
+            </form>
+        </div>
+        
+        <!-- Real-time Analytics Display -->
+        <div class="col-md-6">
+            <div class="analytics-container">
+                <h2>Real-time Analytics</h2>
+                
+                <!-- Status Display -->
+                <div id="analytics-status" class="alert alert-info">
+                    Ready to analyze zone
+                </div>
+                
+                <!-- Progress Tracking -->
+                <div id="analytics-progress"></div>
+                
+                <!-- Results Display -->
+                <div id="analytics-results"></div>
+                
+                <!-- Summary Display -->
+                <div id="analytics-summary" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Initialize map for zone drawing
+let map;
+let drawnItems;
+let analyticsUI;
+let sessionId;
+
+function initializeMap() {
+    // Initialize Leaflet map
+    map = L.map('map').setView([-15.4, -8.6], 12);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+    
+    // Initialize drawing controls
+    drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+    
+    const drawControl = new L.Control.Draw({
+        edit: {
+            featureGroup: drawnItems
+        },
+        draw: {
+            polygon: true,
+            polyline: false,
+            rectangle: true,
+            circle: false,
+            marker: false
+        }
+    });
+    map.addControl(drawControl);
+    
+    // Handle drawing events
+    map.on('draw:created', function(e) {
+        const layer = e.layer;
+        drawnItems.clearLayers();
+        drawnItems.addLayer(layer);
+        
+        // Convert to GeoJSON and store
+        const geoJson = layer.toGeoJSON();
+        document.getElementById('geometry').value = JSON.stringify(geoJson.geometry);
+    });
+}
+
+// Initialize WebSocket connection for analytics
+function initializeAnalytics() {
+    // Generate unique session ID
+    sessionId = 'zone_creation_' + Date.now();
+    
+    // Initialize analytics UI
+    analyticsUI = new AnalyticsProgressUI('analytics-progress');
+}
+
+// Handle form submission
+document.getElementById('zone-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const geometry = document.getElementById('geometry').value;
+    if (!geometry) {
+        alert('Please draw the zone boundary on the map');
+        return;
+    }
+    
+    // Initialize WebSocket connection
+    await analyticsUI.initialize(sessionId);
+    
+    // Disable form during processing
+    const createBtn = document.getElementById('create-btn');
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating zone...';
+    
+    // Submit form with session ID
+    const formData = new FormData(this);
+    formData.append('ws_session_id', sessionId);
+    
+    try {
+        const response = await fetch(this.action, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-WebSocket-Session-ID': sessionId
+            }
+        });
+        
+        if (response.ok) {
+            const contentType = response.headers.get('content-type');
+            
+            if (contentType && contentType.includes('application/json')) {
+                // Handle JSON response
+                const result = await response.json();
+                console.log('Zone created:', result);
+                
+                if (result.success && result.redirect_url) {
+                    // Show success message briefly then redirect
+                    analyticsUI.showStatus('Zone created successfully! Redirecting...', 'success');
+                    
+                    setTimeout(() => {
+                        window.location.href = result.redirect_url;
+                    }, 1500);
+                } else if (result.error) {
+                    throw new Error(result.error);
+                }
+            } else {
+                // Handle HTML response (redirect)
+                window.location.href = response.url;
+            }
+        } else {
+            throw new Error('Failed to create zone');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        analyticsUI.showStatus('Failed to create zone', 'error');
+        
+        // Re-enable form
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create Zone & Start Analysis';
+    }
+});
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    initializeMap();
+    initializeAnalytics();
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    if (analyticsUI) {
+        analyticsUI.destroy();
+    }
+});
+</script>
+{% endblock %}
