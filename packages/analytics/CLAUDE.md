@@ -68,7 +68,8 @@ This package contains three main applications that work together:
 ### Analytics Features
 - Real-time dashboard with interactive filtering
 - Location name standardization and correction handling
-- CSV and Excel export with role-based access control (admin only)
+- CSV and Excel export with browser download (admin only)
+- Custom filename support for exports
 - Day-of-week patterns, vehicle performance, geographic insights
 
 ## Style Guidelines
