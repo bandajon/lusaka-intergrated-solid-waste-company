@@ -1,0 +1,905 @@
+{% extends "base.html" %}
+
+{% block title %}Company Unification Tool{% endblock %}
+
+{% block extra_css %}
+<style>
+    .duplicate-group {
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        background: white;
+    }
+    
+    .group-header {
+        background: #f8f9fa;
+        padding: 15px;
+        border-bottom: 1px solid #dee2e6;
+        border-radius: 8px 8px 0 0;
+    }
+    
+    .company-item {
+        padding: 10px 15px;
+        border-bottom: 1px solid #f1f3f4;
+    }
+    
+    .company-item:last-child {
+        border-bottom: none;
+    }
+    
+    .main-company {
+        background: #e8f4fd;
+        font-weight: bold;
+    }
+    
+    .similar-company {
+        background: #fff3cd;
+        margin-left: 20px;
+    }
+    
+    .similarity-score {
+        color: #6c757d;
+        font-size: 0.9em;
+    }
+    
+    .merge-controls {
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 0 0 8px 8px;
+    }
+    
+    .merge-name-input {
+        width: 100%;
+        margin: 10px 0;
+        font-weight: bold;
+        font-size: 1.1em;
+        border: 2px solid #007bff;
+        border-radius: 8px;
+        background: #f8f9ff;
+    }
+    
+    .merge-name-input:focus {
+        border-color: #0056b3;
+        box-shadow: 0 0 8px rgba(0, 123, 255, 0.3);
+        background: white;
+    }
+    
+    .merge-name-input.is-valid {
+        border-color: #28a745;
+        background: #f8fff8;
+    }
+    
+    .merge-name-input.is-invalid {
+        border-color: #dc3545;
+        background: #fff8f8;
+    }
+    
+    .action-buttons {
+        margin-top: 10px;
+    }
+    
+    .company-select-checkbox {
+        margin-right: 10px;
+        transform: scale(1.2);
+    }
+    
+    .merge-target-radio {
+        margin-right: 5px;
+    }
+    
+    .merge-target-selection {
+        border-top: 2px solid #007bff !important;
+    }
+    
+    .merge-target-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+    
+    .company-item.selected {
+        background: #e8f5e8 !important;
+        border-left: 4px solid #28a745;
+    }
+    
+    .company-item.deselected {
+        background: #f8f9fa !important;
+        opacity: 0.6;
+        border-left: 4px solid #dc3545;
+    }
+    
+    .stats-card {
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .stat-number {
+        font-size: 2em;
+        font-weight: bold;
+        color: #007bff;
+    }
+    
+    .execute-section {
+        position: sticky;
+        bottom: 0;
+        background: white;
+        border-top: 2px solid #007bff;
+        padding: 20px;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .company-id {
+        color: #6c757d;
+        font-size: 0.8em;
+        font-family: monospace;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h1><i class="fas fa-building"></i> Company Unification Tool</h1>
+            <p class="text-muted">Identify and merge duplicate company entries to improve billing accuracy</p>
+        </div>
+    </div>
+    
+    <!-- Summary Statistics -->
+    <div class="row">
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stat-number">{{ summary.total_groups }}</div>
+                <div>Duplicate Groups Found</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stat-number">{{ summary.total_duplicates }}</div>
+                <div>Potential Duplicates</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stat-number">{{ summary.original_count }}</div>
+                <div>Total Companies</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stat-number text-success">{{ summary.potential_reduction }}</div>
+                <div>Potential Reduction</div>
+            </div>
+        </div>
+    </div>
+    
+    {% if summary.total_groups == 0 %}
+    <div class="alert alert-success" role="alert">
+        <h4 class="alert-heading">No Duplicates Found!</h4>
+        <p>No duplicate company entries were detected with the current similarity threshold. Your company database appears to be clean.</p>
+    </div>
+    {% else %}
+    
+    <!-- Controls -->
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <button class="btn btn-success" onclick="selectAllMerges()">
+                <i class="fas fa-check-double"></i> Select All for Merge
+            </button>
+            <button class="btn btn-warning" onclick="clearAllSelections()">
+                <i class="fas fa-times"></i> Clear All Selections
+            </button>
+        </div>
+        <div class="col-md-6 text-right">
+            <a href="{{ url_for('main.export_company_report') }}" class="btn btn-info">
+                <i class="fas fa-download"></i> Export Report
+            </a>
+        </div>
+    </div>
+    
+    <!-- Duplicate Groups -->
+    <div id="duplicateGroups">
+        {% for group in duplicate_groups %}
+        <div class="duplicate-group" data-group-id="{{ group.group_id }}">
+            <div class="group-header">
+                <div class="row">
+                    <div class="col-md-8">
+                        <h5>Group {{ loop.index }} - {{ group.similar_companies|length + 1 }} Companies</h5>
+                    </div>
+                    <div class="col-md-4 text-right">
+                        <label class="form-check-label">
+                            <input type="checkbox" class="form-check-input group-merge-checkbox" 
+                                   data-group-id="{{ group.group_id }}"> 
+                            Merge this group
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main Company -->
+            <div class="company-item main-company">
+                <label class="form-check-label w-100">
+                    <input type="checkbox" class="form-check-input company-select-checkbox" 
+                           data-group-id="{{ group.group_id }}"
+                           data-company-id="{{ group.main_company.company_id }}"
+                           value="{{ group.main_company.company_id }}" checked>
+                    <strong>{{ group.main_company.name }}</strong>
+                    <div class="company-id">ID: {{ group.main_company.company_id }}</div>
+                    {% if group.main_company.location %}
+                    <div class="text-muted">Location: {{ group.main_company.location }}</div>
+                    {% endif %}
+                </label>
+            </div>
+            
+            <!-- Similar Companies -->
+            {% for similar in group.similar_companies %}
+            <div class="company-item similar-company">
+                <label class="form-check-label w-100">
+                    <input type="checkbox" class="form-check-input company-select-checkbox" 
+                           data-group-id="{{ group.group_id }}"
+                           data-company-id="{{ similar.company_id }}"
+                           value="{{ similar.company_id }}" checked>
+                    {{ similar.name }}
+                    <span class="similarity-score">({{ (similar.similarity * 100)|round(1) }}% match)</span>
+                    <div class="company-id">ID: {{ similar.company_id }}</div>
+                    {% if similar.location %}
+                    <div class="text-muted">Location: {{ similar.location }}</div>
+                    {% endif %}
+                </label>
+            </div>
+            {% endfor %}
+            
+            <!-- Merge Target Selection -->
+            <div class="company-item merge-target-selection" style="background: #f0f8ff; border-top: 2px solid #007bff;">
+                <h6 class="mb-2"><i class="fas fa-bullseye text-primary"></i> Merge Target (Keep This Company):</h6>
+                <div class="merge-target-options">
+                    <label class="form-check-label mr-3">
+                        <input type="radio" class="form-check-input merge-target-radio" 
+                               name="merge_target_{{ group.group_id }}" 
+                               value="{{ group.main_company.company_id }}" checked>
+                        <strong>{{ group.main_company.name }}</strong>
+                    </label>
+                    {% for similar in group.similar_companies %}
+                    <label class="form-check-label mr-3">
+                        <input type="radio" class="form-check-input merge-target-radio" 
+                               name="merge_target_{{ group.group_id }}" 
+                               value="{{ similar.company_id }}">
+                        {{ similar.name }}
+                    </label>
+                    {% endfor %}
+                </div>
+                <small class="text-muted"><i class="fas fa-info-circle"></i> The selected company will be kept and updated with the custom name below. Unchecked companies above will be marked as [MERGED].</small>
+            </div>
+            
+            <!-- Merge Controls -->
+            <div class="merge-controls" style="display: none;">
+                <div class="row">
+                    <div class="col-md-12">
+                        <label for="merge_name_{{ group.group_id }}" class="font-weight-bold">
+                            <i class="fas fa-edit text-primary"></i> Custom Merge Name:
+                        </label>
+                        <input type="text" class="form-control merge-name-input" 
+                               id="merge_name_{{ group.group_id }}" 
+                               value="{{ group.suggested_merge_name }}"
+                               placeholder="Type the final company name after merging">
+                        <small class="form-text text-info">
+                            <i class="fas fa-info-circle"></i> 
+                            <strong>Custom Name:</strong> You can edit this field to specify exactly what the merged company should be called. 
+                            The merge target company will be updated to this name, and deselected companies will be marked as [MERGED].
+                        </small>
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <strong>Selected for merge:</strong> <span id="selected_count_{{ group.group_id }}" class="text-primary">0</span> companies | 
+                                <strong>Merge target:</strong> <span id="merge_target_name_{{ group.group_id }}" class="text-success">None</span>
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-md-12">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" 
+                                    onclick="useTargetName({{ group.group_id }})">
+                                <i class="fas fa-copy"></i> Use Target Company Name
+                            </button>
+                            <button type="button" class="btn btn-outline-info" 
+                                    onclick="suggestCleanName({{ group.group_id }})">
+                                <i class="fas fa-magic"></i> Auto-Clean Name
+                            </button>
+                            <button type="button" class="btn btn-outline-warning" 
+                                    onclick="selectAllInGroup({{ group.group_id }})">
+                                <i class="fas fa-check-double"></i> Select All
+                            </button>
+                            <button type="button" class="btn btn-outline-danger" 
+                                    onclick="deselectAllInGroup({{ group.group_id }})">
+                                <i class="fas fa-times"></i> Deselect All
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- Execute Section -->
+    <div class="execute-section">
+        <div class="row">
+            <div class="col-md-8">
+                <h5>Ready to Execute Merges</h5>
+                <p class="mb-0">Review your selections above, then click Execute to merge the selected company groups.</p>
+            </div>
+            <div class="col-md-4 text-right">
+                <button class="btn btn-danger btn-lg" onclick="executeMerges()" id="executeBtn" disabled>
+                    <i class="fas fa-compress-alt"></i> Execute Merges
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    {% endif %}
+</div>
+
+<!-- Enhanced Progress Modal -->
+<div class="modal fade" id="progressModal" tabindex="-1" role="dialog" aria-hidden="true" data-backdrop="static" data-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-cogs mr-2"></i>
+                    Executing Company Merges
+                </h5>
+            </div>
+            <div class="modal-body">
+                <!-- Overall Progress -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="font-weight-bold">Overall Progress</span>
+                        <span id="overallPercentage" class="badge badge-primary">0%</span>
+                    </div>
+                    <div class="progress mb-2" style="height: 25px;">
+                        <div id="overallProgress" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
+                             role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                            <span id="progressText">Starting...</span>
+                        </div>
+                    </div>
+                    <small class="text-muted">
+                        <span id="currentStep">Preparing merge operations...</span>
+                        (<span id="processedCount">0</span> of <span id="totalCount">0</span> groups)
+                    </small>
+                </div>
+                
+                <!-- Current Group Progress -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="font-weight-bold">Current Group</span>
+                        <span id="groupStatus" class="badge badge-info">Waiting...</span>
+                    </div>
+                    <div class="card">
+                        <div class="card-body p-3">
+                            <h6 id="currentGroupName" class="card-title mb-2">No group selected</h6>
+                            <div class="progress" style="height: 20px;">
+                                <div id="groupProgress" class="progress-bar progress-bar-striped bg-info" 
+                                     role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                    <small id="groupProgressText">Ready</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Activity Log -->
+                <div class="mb-3">
+                    <h6 class="font-weight-bold mb-2">
+                        <i class="fas fa-list-alt mr-1"></i>
+                        Activity Log
+                    </h6>
+                    <div id="activityLog" class="border rounded p-3" style="height: 150px; overflow-y: auto; background: #f8f9fa; font-family: monospace; font-size: 0.85em;">
+                        <div class="text-muted">Initializing merge process...</div>
+                    </div>
+                </div>
+                
+                <!-- Statistics -->
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="text-success">
+                            <i class="fas fa-check-circle fa-2x mb-1"></i>
+                            <div class="font-weight-bold" id="successCount">0</div>
+                            <small class="text-muted">Successful</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-danger">
+                            <i class="fas fa-exclamation-circle fa-2x mb-1"></i>
+                            <div class="font-weight-bold" id="errorCount">0</div>
+                            <small class="text-muted">Errors</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-warning">
+                            <i class="fas fa-clock fa-2x mb-1"></i>
+                            <div class="font-weight-bold" id="elapsedTime">0s</div>
+                            <small class="text-muted">Elapsed</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-info">
+                            <i class="fas fa-compress-alt fa-2x mb-1"></i>
+                            <div class="font-weight-bold" id="companiesMerged">0</div>
+                            <small class="text-muted">Companies</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div id="progressButtons">
+                    <button type="button" class="btn btn-secondary" onclick="cancelMerge()" id="cancelBtn">
+                        <i class="fas fa-times mr-1"></i>
+                        Cancel
+                    </button>
+                </div>
+                <div id="completeButtons" style="display: none;">
+                    <button type="button" class="btn btn-primary" onclick="closeProgressModal()">
+                        <i class="fas fa-check mr-1"></i>
+                        Close
+                    </button>
+                    <button type="button" class="btn btn-success" onclick="window.location.reload()">
+                        <i class="fas fa-sync-alt mr-1"></i>
+                        Refresh Page
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Initialize visual state for all groups
+    $('.duplicate-group').each(function() {
+        const groupId = $(this).data('group-id');
+        updateGroupVisuals(groupId);
+    });
+    
+    // Handle group merge checkbox changes
+    $('.group-merge-checkbox').change(function() {
+        const groupId = $(this).data('group-id');
+        const isChecked = $(this).is(':checked');
+        
+        updateGroupVisuals(groupId);
+        updateExecuteButton();
+    });
+    
+    // Handle company selection checkboxes
+    $('.company-select-checkbox').change(function() {
+        const groupId = $(this).data('group-id');
+        updateGroupVisuals(groupId);
+        updateExecuteButton();
+    });
+    
+    // Handle merge target radio button changes
+    $('.merge-target-radio').change(function() {
+        const groupId = $(this).attr('name').split('_').pop();
+        updateGroupVisuals(groupId);
+    });
+    
+    // Highlight custom name field when user starts typing
+    $('.merge-name-input').on('input', function() {
+        $(this).removeClass('is-invalid is-valid');
+        
+        if ($(this).val().trim().length > 0) {
+            $(this).addClass('is-valid');
+        }
+    });
+    
+    // Initialize execute button state
+    updateExecuteButton();
+});
+
+function selectAllMerges() {
+    $('.group-merge-checkbox').prop('checked', true).trigger('change');
+}
+
+function clearAllSelections() {
+    $('.group-merge-checkbox').prop('checked', false).trigger('change');
+}
+
+function updateExecuteButton() {
+    const checkedGroups = $('.group-merge-checkbox:checked').length;
+    $('#executeBtn').prop('disabled', checkedGroups === 0);
+}
+
+function useTargetName(groupId) {
+    // Get the currently selected merge target company name
+    const selectedRadio = $(`input[name="merge_target_${groupId}"]:checked`);
+    const targetCompanyId = selectedRadio.val();
+    
+    // Find the company name by looking for the checkbox with matching company ID
+    let targetCompanyName = '';
+    $(`.company-select-checkbox[data-group-id="${groupId}"][data-company-id="${targetCompanyId}"]`).each(function() {
+        targetCompanyName = $(this).closest('.company-item').find('strong, label').clone().children().remove().end().text().trim();
+    });
+    
+    $(`#merge_name_${groupId}`).val(targetCompanyName).trigger('input');
+}
+
+function selectAllInGroup(groupId) {
+    $(`.company-select-checkbox[data-group-id="${groupId}"]`).prop('checked', true);
+    updateGroupVisuals(groupId);
+    updateExecuteButton();
+}
+
+function deselectAllInGroup(groupId) {
+    $(`.company-select-checkbox[data-group-id="${groupId}"]`).prop('checked', false);
+    updateGroupVisuals(groupId);
+    updateExecuteButton();
+}
+
+function updateGroupVisuals(groupId) {
+    const selectedCheckboxes = $(`.company-select-checkbox[data-group-id="${groupId}"]:checked`);
+    const selectedCount = selectedCheckboxes.length;
+    
+    // Update visual indicators for each company item
+    $(`.company-select-checkbox[data-group-id="${groupId}"]`).each(function() {
+        const companyItem = $(this).closest('.company-item');
+        if ($(this).is(':checked')) {
+            companyItem.removeClass('deselected').addClass('selected');
+        } else {
+            companyItem.removeClass('selected').addClass('deselected');
+        }
+    });
+    
+    // Update selected count display
+    $(`#selected_count_${groupId}`).text(selectedCount);
+    
+    // Update merge target name display
+    const targetRadio = $(`input[name="merge_target_${groupId}"]:checked`);
+    const targetCompanyId = targetRadio.val();
+    let targetCompanyName = 'None';
+    
+    if (targetCompanyId) {
+        $(`.company-select-checkbox[data-group-id="${groupId}"][data-company-id="${targetCompanyId}"]`).each(function() {
+            targetCompanyName = $(this).closest('.company-item').find('strong, label').clone().children().remove().end().text().trim();
+        });
+    }
+    
+    $(`#merge_target_name_${groupId}`).text(targetCompanyName);
+    
+    // Show/hide merge controls based on selection count
+    const mergeControls = $(`.duplicate-group[data-group-id="${groupId}"] .merge-controls`);
+    const groupCheckbox = $(`.group-merge-checkbox[data-group-id="${groupId}"]`);
+    
+    if (selectedCount >= 2 && groupCheckbox.is(':checked')) {
+        mergeControls.show();
+    } else {
+        mergeControls.hide();
+        if (selectedCount < 2) {
+            groupCheckbox.prop('checked', false);
+        }
+    }
+}
+
+function suggestCleanName(groupId) {
+    // Get names of selected companies in this group
+    const companyNames = [];
+    $(`.company-select-checkbox[data-group-id="${groupId}"]:checked`).each(function() {
+        const companyName = $(this).closest('.company-item').find('strong, label').clone().children().remove().end().text().trim();
+        companyNames.push(companyName);
+    });
+    
+    if (companyNames.length === 0) {
+        alert('No companies selected for this group');
+        return;
+    }
+    
+    // Find the shortest name (often the cleanest)
+    let cleanestName = companyNames.reduce((shortest, current) => {
+        return current.length < shortest.length ? current : shortest;
+    });
+    
+    // Clean up common patterns
+    cleanestName = cleanestName
+        .replace(/\s+/g, ' ')           // Multiple spaces to single space
+        .replace(/[^\w\s&.-]/g, '')     // Remove special characters except &, ., -
+        .replace(/\b(LTD|LIMITED|COMPANY|CO)\b/gi, '') // Remove common suffixes
+        .replace(/\s+$/, '')            // Remove trailing spaces
+        .trim();
+    
+    // Capitalize properly
+    cleanestName = cleanestName.replace(/\b\w+/g, word => 
+        word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    );
+    
+    $(`#merge_name_${groupId}`).val(cleanestName).trigger('input');
+}
+
+// Global variables for progress tracking
+let mergeStartTime;
+let mergeProcessCancelled = false;
+let totalMergeOperations = 0;
+let completedMergeOperations = 0;
+
+function executeMerges() {
+    // First test the backend connection
+    addToActivityLog('🔍 Testing backend connection...');
+    
+    $.ajax({
+        url: '{{ url_for("main.test_company_merge") }}',
+        method: 'GET',
+        timeout: 10000,
+        success: function(response) {
+            addToActivityLog('✅ Backend connection successful');
+            proceedWithMergeExecution();
+        },
+        error: function(xhr, status, error) {
+            addToActivityLog(`❌ Backend connection failed: ${error}`);
+            alert('Cannot connect to backend service. Please check if the Flask app is running on port 5002.');
+            closeProgressModal();
+        }
+    });
+}
+
+function proceedWithMergeExecution() {
+    const mergeDecisions = [];
+    
+    $('.group-merge-checkbox:checked').each(function() {
+        const groupId = $(this).data('group-id');
+        const mergeToId = $(`input[name="merge_target_${groupId}"]:checked`).val();
+        const mergeName = $(`#merge_name_${groupId}`).val().trim();
+        
+        // Validate merge name
+        if (!mergeName) {
+            alert(`Please enter a merge name for Group ${groupId}`);
+            $(`#merge_name_${groupId}`).addClass('is-invalid').focus();
+            return false;
+        }
+        
+        // Get selected company IDs in this group
+        const selectedCompanyIds = [];
+        $(`.company-select-checkbox[data-group-id="${groupId}"]:checked`).each(function() {
+            selectedCompanyIds.push($(this).data('company-id'));
+        });
+        
+        // Validate that we have at least 2 companies selected
+        if (selectedCompanyIds.length < 2) {
+            alert(`Please select at least 2 companies to merge in Group ${groupId}`);
+            return false;
+        }
+        
+        // Validate that merge target is among selected companies
+        if (!selectedCompanyIds.includes(mergeToId)) {
+            alert(`The merge target must be one of the selected companies in Group ${groupId}`);
+            return false;
+        }
+        
+        // Companies to remove are selected companies except the merge target
+        const companiesToRemove = selectedCompanyIds.filter(id => id !== mergeToId);
+        
+        mergeDecisions.push({
+            group_id: groupId,
+            action: 'merge',
+            merge_to_id: mergeToId,
+            merge_name: mergeName,
+            companies_to_remove: companiesToRemove,
+            selected_companies: selectedCompanyIds
+        });
+    });
+    
+    if (mergeDecisions.length === 0) {
+        alert('Please select at least one group to merge.');
+        return;
+    }
+    
+    // Initialize progress tracking
+    mergeStartTime = new Date();
+    mergeProcessCancelled = false;
+    totalMergeOperations = mergeDecisions.length;
+    completedMergeOperations = 0;
+    
+    // Setup progress modal
+    setupProgressModal(mergeDecisions);
+    
+    // Show progress modal
+    $('#progressModal').modal('show');
+    
+    // Start processing merges one by one
+    addToActivityLog(`🚀 Starting sequential processing of ${mergeDecisions.length} merge groups`);
+    processMergesSequentially(mergeDecisions, 0);
+}
+
+function setupProgressModal(mergeDecisions) {
+    // Reset all progress indicators
+    $('#overallProgress').css('width', '0%').attr('aria-valuenow', 0);
+    $('#overallPercentage').text('0%');
+    $('#progressText').text('Starting...');
+    $('#processedCount').text('0');
+    $('#totalCount').text(mergeDecisions.length);
+    $('#currentStep').text('Preparing merge operations...');
+    
+    $('#groupProgress').css('width', '0%').attr('aria-valuenow', 0);
+    $('#groupStatus').removeClass().addClass('badge badge-info').text('Waiting...');
+    $('#currentGroupName').text('No group selected');
+    $('#groupProgressText').text('Ready');
+    
+    $('#successCount').text('0');
+    $('#errorCount').text('0');
+    $('#elapsedTime').text('0s');
+    $('#companiesMerged').text('0');
+    
+    $('#activityLog').html('<div class="text-muted">Initializing merge process...</div>');
+    
+    // Show cancel button, hide complete buttons
+    $('#progressButtons').show();
+    $('#completeButtons').hide();
+    
+    // Start elapsed time counter
+    startElapsedTimeCounter();
+}
+
+function processMergesSequentially(mergeDecisions, currentIndex) {
+    if (mergeProcessCancelled || currentIndex >= mergeDecisions.length) {
+        // All merges completed or cancelled
+        finalizeMergeProcess(currentIndex >= mergeDecisions.length);
+        return;
+    }
+    
+    const currentMerge = mergeDecisions[currentIndex];
+    const overallPercent = Math.round((currentIndex / mergeDecisions.length) * 100);
+    
+    // Update overall progress
+    $('#overallProgress').css('width', overallPercent + '%').attr('aria-valuenow', overallPercent);
+    $('#overallPercentage').text(overallPercent + '%');
+    $('#progressText').text(`Processing group ${currentIndex + 1}...`);
+    $('#processedCount').text(currentIndex);
+    $('#currentStep').text(`Processing merge group ${currentIndex + 1} of ${mergeDecisions.length}`);
+    
+    // Update current group info
+    $('#currentGroupName').text(`Group ${currentMerge.group_id} - ${currentMerge.merge_name}`);
+    $('#groupStatus').removeClass().addClass('badge badge-warning').text('Processing...');
+    $('#groupProgress').css('width', '25%').attr('aria-valuenow', 25);
+    $('#groupProgressText').text('Validating...');
+    
+    // Add to activity log
+    addToActivityLog(`📋 Starting merge for group ${currentMerge.group_id}: ${currentMerge.merge_name}`);
+    addToActivityLog(`🎯 Target: ${currentMerge.merge_to_id}, Removing: ${currentMerge.companies_to_remove.length} companies`);
+    
+    // Execute the merge via AJAX
+    $.ajax({
+        url: '{{ url_for("main.execute_company_merge") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify([currentMerge]), // Send one merge at a time
+        timeout: 60000, // 60 second timeout per merge (increased for database operations)
+        beforeSend: function() {
+            $('#groupProgress').css('width', '50%').attr('aria-valuenow', 50);
+            $('#groupProgressText').text('Executing...');
+        },
+        success: function(response) {
+            $('#groupProgress').css('width', '100%').attr('aria-valuenow', 100);
+            $('#groupProgressText').text('Complete');
+            
+            if (response.success) {
+                $('#groupStatus').removeClass().addClass('badge badge-success').text('Success');
+                addToActivityLog(`✅ Successfully merged group ${currentMerge.group_id}`);
+                
+                // Update success counter
+                const successCount = parseInt($('#successCount').text()) + 1;
+                $('#successCount').text(successCount);
+                
+                // Update companies merged counter
+                const companiesMerged = parseInt($('#companiesMerged').text()) + currentMerge.companies_to_remove.length;
+                $('#companiesMerged').text(companiesMerged);
+            } else {
+                $('#groupStatus').removeClass().addClass('badge badge-danger').text('Error');
+                addToActivityLog(`❌ Error in group ${currentMerge.group_id}: ${response.message}`);
+                
+                // Update error counter
+                const errorCount = parseInt($('#errorCount').text()) + 1;
+                $('#errorCount').text(errorCount);
+            }
+            
+            // Continue with next merge after a brief delay
+            setTimeout(() => {
+                processMergesSequentially(mergeDecisions, currentIndex + 1);
+            }, 500);
+        },
+        error: function(xhr, status, error) {
+            $('#groupProgress').css('width', '100%').attr('aria-valuenow', 100);
+            $('#groupProgressText').text('Failed');
+            $('#groupStatus').removeClass().addClass('badge badge-danger').text('Failed');
+            
+            let errorMsg = error;
+            if (status === 'timeout') {
+                errorMsg = 'Request timed out (>60s)';
+            } else if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMsg = xhr.responseJSON.message;
+            } else if (xhr.status === 0) {
+                errorMsg = 'Network connection failed';
+            }
+            
+            addToActivityLog(`💥 Error in group ${currentMerge.group_id}: ${errorMsg}`);
+            
+            // Update error counter
+            const errorCount = parseInt($('#errorCount').text()) + 1;
+            $('#errorCount').text(errorCount);
+            
+            // Continue with next merge after a brief delay
+            setTimeout(() => {
+                processMergesSequentially(mergeDecisions, currentIndex + 1);
+            }, 1000); // Longer delay after error
+        }
+    });
+}
+
+function addToActivityLog(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `<div><span class="text-muted">[${timestamp}]</span> ${message}</div>`;
+    
+    const logContainer = $('#activityLog');
+    logContainer.append(logEntry);
+    
+    // Auto-scroll to bottom
+    logContainer.scrollTop(logContainer[0].scrollHeight);
+    
+    // Limit log entries to prevent memory issues
+    const logEntries = logContainer.find('div');
+    if (logEntries.length > 100) {
+        logEntries.first().remove();
+    }
+}
+
+function startElapsedTimeCounter() {
+    const timerInterval = setInterval(() => {
+        if (mergeProcessCancelled || !$('#progressModal').hasClass('show')) {
+            clearInterval(timerInterval);
+            return;
+        }
+        
+        const elapsed = Math.floor((new Date() - mergeStartTime) / 1000);
+        $('#elapsedTime').text(elapsed + 's');
+    }, 1000);
+}
+
+function finalizeMergeProcess(completed) {
+    if (completed) {
+        // All merges completed successfully
+        $('#overallProgress').css('width', '100%').attr('aria-valuenow', 100);
+        $('#overallPercentage').text('100%');
+        $('#progressText').text('Complete!');
+        $('#currentStep').text('All merge operations completed');
+        $('#processedCount').text(totalMergeOperations);
+        
+        addToActivityLog(`🎉 All merge operations completed successfully!`);
+        addToActivityLog(`📊 Summary: ${$('#successCount').text()} successful, ${$('#errorCount').text()} errors`);
+    } else {
+        addToActivityLog(`⚠️ Merge process was cancelled or interrupted`);
+    }
+    
+    // Hide cancel button, show complete buttons
+    $('#progressButtons').hide();
+    $('#completeButtons').show();
+}
+
+function cancelMerge() {
+    if (confirm('Are you sure you want to cancel the merge process?')) {
+        mergeProcessCancelled = true;
+        addToActivityLog(`🛑 Merge process cancelled by user`);
+        $('#currentStep').text('Merge process cancelled');
+        $('#groupStatus').removeClass().addClass('badge badge-secondary').text('Cancelled');
+        
+        // Show complete buttons
+        $('#progressButtons').hide();
+        $('#completeButtons').show();
+    }
+}
+
+function closeProgressModal() {
+    $('#progressModal').modal('hide');
+}
+</script>
+{% endblock %}

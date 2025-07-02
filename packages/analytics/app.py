@@ -3,12 +3,22 @@ from datetime import datetime
 import os
 import logging
 import sys
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Add current directory to Python path for imports
+current_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(current_dir))
+
 # Import database manager and plate cleaner utilities
-from flask_app.utils.db_manager import DatabaseManager
+try:
+    from flask_app.utils.db_manager import DatabaseManager
+except ImportError:
+    # Fallback for import issues
+    print("Warning: Could not import DatabaseManager, some features may not work")
+    DatabaseManager = None
 
 # Create app
 app = Flask(__name__, 
@@ -29,8 +39,13 @@ app.config['DB_PORT'] = 5432
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Register routes
-from flask_app.routes import main_bp
-app.register_blueprint(main_bp)
+try:
+    from flask_app.routes import main_bp
+    app.register_blueprint(main_bp)
+    print("✅ Successfully imported and registered flask_app routes")
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import flask_app routes: {e}")
+    print("   Some features may not be available")
 
 # Create a route to serve dashboard assets directly
 @app.route('/dashboards/weigh_events/assets/<path:filename>')

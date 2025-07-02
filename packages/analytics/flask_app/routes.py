@@ -1,12 +1,14 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, current_app, make_response
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import uuid
 import json
+import traceback
 from .utils.db_manager import DatabaseManager
 from .utils.plate_cleaner import clean_license_plate, batch_clean_plates
+from .utils.company_unifier import CompanyUnifier
 
 main_bp = Blueprint('main', __name__)
 db_manager = DatabaseManager()
@@ -268,3 +270,155 @@ def analytics_dashboard():
     """Redirect to the standalone analytics dashboard"""
     # Redirect to the standalone dashboard running on port 5006
     return redirect('http://localhost:5006/')
+
+@main_bp.route('/companies/unify')
+def company_unify():
+    """Company unification tool main page"""
+    try:
+        unifier = CompanyUnifier()
+        success = unifier.load_companies_from_db()
+        
+        if not success:
+            flash('Unable to load companies from database', 'danger')
+            return redirect(url_for('main.index'))
+        
+        # Find duplicate groups
+        duplicate_groups = unifier.find_duplicate_groups()
+        summary = unifier.get_duplicate_summary()
+        
+        return render_template('company_unify.html', 
+                             duplicate_groups=duplicate_groups,
+                             summary=summary)
+    
+    except Exception as e:
+        flash(f'Error loading company unification tool: {str(e)}', 'danger')
+        return redirect(url_for('main.index'))
+
+@main_bp.route('/companies/unify/execute', methods=['POST'])
+def execute_company_merge():
+    """Execute company merge based on user decisions"""
+    try:
+        merge_decisions = request.json
+        
+        if not merge_decisions:
+            return jsonify({'success': False, 'message': 'No merge decisions provided'})
+        
+        print(f"📋 Received merge decisions: {len(merge_decisions)} groups")
+        print(f"📋 Decision data: {json.dumps(merge_decisions, indent=2)}")
+        
+        # Validate the merge decisions format
+        for i, decision in enumerate(merge_decisions):
+            required_fields = ['group_id', 'action', 'merge_to_id', 'merge_name']
+            missing_fields = [field for field in required_fields if field not in decision]
+            if missing_fields:
+                return jsonify({
+                    'success': False, 
+                    'message': f'Missing required fields in decision {i+1}: {missing_fields}'
+                })
+        
+        print("✅ Merge decisions validation passed")
+        
+        unifier = CompanyUnifier()
+        print("✅ CompanyUnifier initialized")
+        
+        success, message = unifier.merge_companies(merge_decisions)
+        print(f"📊 Merge result: success={success}, message={message}")
+        
+        return jsonify({'success': success, 'message': message})
+    
+    except Exception as e:
+        error_msg = f'Error executing merge: {str(e)}'
+        print(f"❌ Exception in execute_company_merge: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': error_msg})
+
+@main_bp.route('/companies/search/<pattern>')
+def search_companies_by_pattern(pattern):
+    """Search for companies matching a pattern"""
+    try:
+        unifier = CompanyUnifier()
+        unifier.load_companies_from_db()
+        
+        matching_companies = unifier.get_companies_by_pattern(pattern)
+        
+        return jsonify({
+            'success': True,
+            'pattern': pattern,
+            'companies': matching_companies,
+            'count': len(matching_companies)
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error searching companies: {str(e)}'})
+
+@main_bp.route('/health')
+def health_check():
+    """Simple health check endpoint"""
+    try:
+        # Test database connection
+        db_status = 'unknown'
+        try:
+            table_counts = db_manager.get_table_counts_dict()
+            db_status = 'connected' if table_counts else 'no_data'
+        except Exception:
+            db_status = 'disconnected'
+        
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'database': db_status,
+            'version': '1.0.0'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@main_bp.route('/companies/unify/report')
+def export_company_report():
+    """Export company duplicate analysis report"""
+    try:
+        unifier = CompanyUnifier()
+        unifier.load_companies_from_db()
+        unifier.find_duplicate_groups()
+        
+        report_path = unifier.export_duplicate_report()
+        
+        if report_path:
+            return send_file(report_path, as_attachment=True)
+        else:
+            flash('Error generating report', 'danger')
+            return redirect(url_for('main.company_unify'))
+    
+    except Exception as e:
+        flash(f'Error generating report: {str(e)}', 'danger')
+        return redirect(url_for('main.company_unify'))
+
+@main_bp.route('/companies/unify/test', methods=['GET', 'POST'])
+def test_company_merge():
+    """Test endpoint for company merge functionality"""
+    if request.method == 'GET':
+        return jsonify({
+            'success': True,
+            'message': 'Company merge endpoint is working',
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    elif request.method == 'POST':
+        try:
+            data = request.json or {}
+            return jsonify({
+                'success': True,
+                'message': 'POST request received successfully',
+                'received_data': data,
+                'timestamp': datetime.now().isoformat()
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'message': f'Error processing POST: {str(e)}',
+                'timestamp': datetime.now().isoformat()
+            })

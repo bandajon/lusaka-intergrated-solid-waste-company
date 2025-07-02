@@ -6,16 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Development
 - Install dependencies: `pip install -r requirements.txt`
+- **Unified Startup (Recommended)**: `python start_analytics.py [--portal|--dashboard|--flask|--zoning|--both|--all]`
+- Run unified portal: `python start_analytics.py --portal` (available at http://localhost:5000)
 - Run main analytics dashboard: `python db_dashboard.py` (available at http://localhost:5007)
-- Run Flask data management app: `python flask_app/run.py` (available at http://localhost:5001)
-- Start both services: `./start_both.sh`
+- Run Flask data management app: `python flask_app/run.py` (available at http://localhost:5002)
+- Run zoning service: `python start_analytics.py --zoning` (available at http://localhost:5001)
+- Start analytics services: `python start_analytics.py --both`
+- **Start all services**: `python start_analytics.py --all` (complete platform)
 - Run specific dashboards: `./run_db_dashboard.sh`, `./run_weigh_dashboard.sh`
 
 ### Testing
+- **Unified Testing**: `python start_analytics.py --test` or `python start_analytics.py --company-test`
 - Run all tests: `python -m pytest test_*.py -v`
 - Test database connection: `python test_deployment.py`
 - Test license plate cleaning: `python test_plate_cleaner.py`
 - Test filter persistence: `python test_filter_persistence.py`
+- Test company unification: `python test_company_unifier.py`
 
 ### Deployment
 - Docker build: `docker build -t liswmc-analytics .`
@@ -25,19 +31,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 ### Multi-Application Structure
-This package contains three main applications that work together:
+This package contains four main applications that work together:
 
-1. **Dash Analytics Dashboard** (`db_dashboard.py`)
+1. **Unified Portal** (`portal.py`)
+   - Single sign-on entry point for all services
+   - User authentication and session management
+   - Centralized access to all applications
+
+2. **Dash Analytics Dashboard** (`db_dashboard.py`)
    - Real-time waste collection analytics and visualization
    - Multi-tab interface: Overview, Analysis, Locations, Data Table
    - Direct PostgreSQL connectivity with CSV fallback
 
-2. **Flask Data Management App** (`flask_app/`)
+3. **Flask Data Management App** (`flask_app/`)
    - File upload, CSV processing, data import/export
    - License plate cleaning and standardization
    - Database management utilities
 
-3. **Jupyter Interface** (`database_manager.py`)
+4. **Zoning Service** (../zoning/)
+   - Geographic zone management and GIS analytics
+   - Population and demographics analysis
+   - Google Earth Engine integration
+   - Waste collection optimization
+
+5. **Jupyter Interface** (`database_manager.py`)
    - Interactive database operations and exploration
    - Batch data processing with progress tracking
 
@@ -49,9 +66,12 @@ This package contains three main applications that work together:
 - **UUID-Based IDs**: New UUIDs generated on import to prevent conflicts
 
 ### Authentication System
+- **Unified Authentication**: Single sign-on across all services
 - bcrypt password hashing with account lockout (5 attempts = 30min lockout)
 - Role-based access control with 8-hour session timeout
+- Cross-service session bridging for seamless access
 - User activity logging and security monitoring
+- **SSO Integration**: Zoning service authenticates via analytics portal
 
 ## Key Components
 

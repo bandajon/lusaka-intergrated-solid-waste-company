@@ -29,6 +29,7 @@ from database import read_companies, read_vehicles, read_weigh_events, check_con
 
 # Import authentication module
 from auth import AuthManager
+from dash_auth_check import auto_login_from_portal
 
 # Enable debug mode for console output
 DEBUG = True
@@ -1376,6 +1377,9 @@ def create_dashboard_layout():
 
 # Main App Layout with Authentication
 app.layout = html.Div([
+    # URL component for capturing session tokens
+    dcc.Location(id='url', refresh=False),
+    
     # Session storage for authentication
     dcc.Store(id='session-data', storage_type='session'),
     dcc.Store(id='user-data', storage_type='session'),
@@ -1463,6 +1467,32 @@ def check_existing_session(session_data, current_user_data):
     if current_user_data:
         debug_print(f"User already authenticated: {current_user_data.get('username', 'Unknown')}")
         return create_dashboard_layout(), current_user_data
+    
+    # Portal authentication will be handled by URL callback
+    
+    return dash.no_update, dash.no_update
+
+# Portal authentication check callback - checks URL for session token
+@app.callback(
+    [Output('main-content', 'children', allow_duplicate=True),
+     Output('user-data', 'data', allow_duplicate=True)],
+    [Input('url', 'href')],
+    [State('user-data', 'data')],
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def check_portal_auth_from_url(href, current_user_data):
+    # Don't override if user is already logged in
+    if current_user_data:
+        return dash.no_update, dash.no_update
+        
+    if href:
+        portal_auth_success, portal_user_data, message = auto_login_from_portal(href)
+        if portal_auth_success:
+            debug_print(f"🔗 Portal authentication successful: {portal_user_data.get('username', 'Unknown')} - {message}")
+            return create_dashboard_layout(), portal_user_data
+        elif message != "No session token in URL":
+            debug_print(f"🔗 Portal authentication failed: {message}")
     
     return dash.no_update, dash.no_update
 

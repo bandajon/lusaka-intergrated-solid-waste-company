@@ -22,35 +22,111 @@ def debug_print(*args, **kwargs):
 
 debug_print("Dashboard module loading...")
 
-# Load data
-parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-debug_print(f"Parent directory: {parent_dir}")
+# Add current directory to path for imports
+current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, current_dir)
 
-weigh_events_file = os.path.join(parent_dir, 'extracted_weigh_events.csv')
-vehicles_file = os.path.join(parent_dir, 'extracted_vehicles.csv')
-companies_file = os.path.join(parent_dir, 'extracted_companies.csv')
-
-debug_print(f"Data files:")
-debug_print(f"  Weigh events: {weigh_events_file} (exists: {os.path.exists(weigh_events_file)})")
-debug_print(f"  Vehicles: {vehicles_file} (exists: {os.path.exists(vehicles_file)})")
-debug_print(f"  Companies: {companies_file} (exists: {os.path.exists(companies_file)})")
+# Import database connection utilities
+try:
+    from database_connection import read_companies, read_vehicles, read_weigh_events, check_connection
+    debug_print("✅ Successfully imported database connection utilities")
+    DATABASE_AVAILABLE = True
+except ImportError as e:
+    debug_print(f"⚠️ Could not import database utilities: {e}")
+    DATABASE_AVAILABLE = False
 
 # Load datasets
 def load_data():
     debug_print("Loading datasets...")
     
-    # Load the datasets
-    debug_print(f"Reading weigh events from {weigh_events_file}")
-    weigh_df = pd.read_csv(weigh_events_file)
-    debug_print(f"Loaded {len(weigh_df)} weigh event records")
+    if DATABASE_AVAILABLE:
+        # Test database connection first
+        is_connected, msg = check_connection()
+        if is_connected:
+            debug_print("✅ Database connection successful")
+            
+            # Load data from database
+            debug_print("Reading weigh events from database...")
+            weigh_df = read_weigh_events(use_csv_fallback=True)
+            debug_print(f"Loaded {len(weigh_df)} weigh event records")
+            
+            debug_print("Reading vehicles from database...")
+            vehicles_df = read_vehicles()
+            debug_print(f"Loaded {len(vehicles_df)} vehicle records")
+            
+            debug_print("Reading companies from database...")
+            companies_df = read_companies()
+            debug_print(f"Loaded {len(companies_df)} company records")
+            
+            # Process the data for dashboard use
+            return process_data_for_dashboard(weigh_df, vehicles_df, companies_df)
+        else:
+            debug_print(f"❌ Database connection failed: {msg}")
+            debug_print("Attempting to use CSV fallback files...")
+            return load_data_from_csv()
+    else:
+        debug_print("Database not available, attempting CSV fallback...")
+        return load_data_from_csv()
+
+def load_data_from_csv():
+    """Fallback function to load data from CSV files"""
+    parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    debug_print(f"Parent directory: {parent_dir}")
+
+    weigh_events_file = os.path.join(parent_dir, 'extracted_weigh_events.csv')
+    vehicles_file = os.path.join(parent_dir, 'extracted_vehicles.csv')
+    companies_file = os.path.join(parent_dir, 'extracted_companies.csv')
+
+    debug_print(f"CSV fallback files:")
+    debug_print(f"  Weigh events: {weigh_events_file} (exists: {os.path.exists(weigh_events_file)})")
+    debug_print(f"  Vehicles: {vehicles_file} (exists: {os.path.exists(vehicles_file)})")
+    debug_print(f"  Companies: {companies_file} (exists: {os.path.exists(companies_file)})")
+
+    # Check if any CSV files exist
+    csv_files_exist = (os.path.exists(weigh_events_file) or 
+                      os.path.exists(vehicles_file) or 
+                      os.path.exists(companies_file))
     
-    debug_print(f"Reading vehicles from {vehicles_file}")
-    vehicles_df = pd.read_csv(vehicles_file)
-    debug_print(f"Loaded {len(vehicles_df)} vehicle records")
+    if not csv_files_exist:
+        debug_print("❌ No CSV files found and database not available")
+        debug_print("Creating empty DataFrames for development mode...")
+        # Return empty DataFrames with expected columns
+        weigh_df = pd.DataFrame(columns=['id', 'vehicle_id', 'event_type', 'weight', 'event_time', 'remarks'])
+        vehicles_df = pd.DataFrame(columns=['id', 'plate_number', 'company_id'])
+        companies_df = pd.DataFrame(columns=['id', 'name'])
+    else:
+        # Load the datasets from CSV
+        if os.path.exists(weigh_events_file):
+            debug_print(f"Reading weigh events from {weigh_events_file}")
+            weigh_df = pd.read_csv(weigh_events_file)
+            debug_print(f"Loaded {len(weigh_df)} weigh event records")
+        else:
+            weigh_df = pd.DataFrame(columns=['id', 'vehicle_id', 'event_type', 'weight', 'event_time', 'remarks'])
+        
+        if os.path.exists(vehicles_file):
+            debug_print(f"Reading vehicles from {vehicles_file}")
+            vehicles_df = pd.read_csv(vehicles_file)
+            debug_print(f"Loaded {len(vehicles_df)} vehicle records")
+        else:
+            vehicles_df = pd.DataFrame(columns=['id', 'plate_number', 'company_id'])
+        
+        if os.path.exists(companies_file):
+            debug_print(f"Reading companies from {companies_file}")
+            companies_df = pd.read_csv(companies_file)
+            debug_print(f"Loaded {len(companies_df)} company records")
+        else:
+            companies_df = pd.DataFrame(columns=['id', 'name'])
     
-    debug_print(f"Reading companies from {companies_file}")
-    companies_df = pd.read_csv(companies_file)
-    debug_print(f"Loaded {len(companies_df)} company records")
+    # Process the data for dashboard use
+    return process_data_for_dashboard(weigh_df, vehicles_df, companies_df)
+
+def process_data_for_dashboard(weigh_df, vehicles_df, companies_df):
+    """Process the loaded data for dashboard use"""
+    if len(weigh_df) == 0:
+        debug_print("⚠️ No weigh event data available")
+        # Return empty processed data
+        merged_df = pd.DataFrame()
+        return merged_df, weigh_df, vehicles_df, companies_df
     
     # Convert event_time to datetime
     weigh_df['event_time'] = pd.to_datetime(weigh_df['event_time'])
@@ -82,16 +158,42 @@ def load_data():
         
         # Check if name column exists in companies_df
         if 'name' in companies_df.columns:
+            # Use 'id' instead of 'company_id' if that's the actual column name
+            if 'id' in companies_df.columns and 'company_id' not in companies_df.columns:
+                companies_df = companies_df.rename(columns={'id': 'company_id'})
             merged_df = merged_df.merge(companies_df[['company_id', 'name']], on='company_id', how='left')
             merged_df.rename(columns={'name': 'company_name'}, inplace=True)
         else:
             # Add placeholder for company_name
             merged_df['company_name'] = 'Unknown'
+            
+        # Ensure required columns exist for downstream processing
+        required_columns = ['weight_kg', 'session_id', 'license_plate']
+        for col in required_columns:
+            if col not in merged_df.columns:
+                if col == 'weight_kg' and 'weight' in merged_df.columns:
+                    merged_df['weight_kg'] = merged_df['weight']
+                elif col == 'license_plate' and 'plate_number' in merged_df.columns:
+                    merged_df['license_plate'] = merged_df['plate_number']
+                elif col == 'session_id':
+                    # Generate session_id if it doesn't exist - group by vehicle and day
+                    merged_df['session_id'] = (merged_df['vehicle_id'].astype(str) + '_' + 
+                                             merged_df['date'].astype(str))
+                else:
+                    merged_df[col] = 'Unknown'
+                    
     except Exception as e:
-        print(f"Error during merge: {e}")
+        debug_print(f"Error during merge: {e}")
         # Create basic merged_df without joins
         merged_df = weigh_df.copy()
         merged_df['company_name'] = 'Unknown'
+        # Add missing columns
+        if 'weight_kg' not in merged_df.columns and 'weight' in merged_df.columns:
+            merged_df['weight_kg'] = merged_df['weight']
+        if 'license_plate' not in merged_df.columns:
+            merged_df['license_plate'] = 'Unknown'
+        if 'session_id' not in merged_df.columns:
+            merged_df['session_id'] = merged_df['vehicle_id'].astype(str) + '_' + merged_df['date'].astype(str)
     
     return merged_df, weigh_df, vehicles_df, companies_df
 
