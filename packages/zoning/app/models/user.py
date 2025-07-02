@@ -32,6 +32,9 @@ class User(UserMixin, db.Model):
     last_login = db.Column(db.DateTime)
     is_active = db.Column(db.Boolean, default=True)
     
+    # External authentication flag
+    is_external_auth = db.Column(db.Boolean, default=False)
+    
     # Relationships
     zones_created = db.relationship('Zone', backref='creator', lazy='dynamic',
                                   foreign_keys='Zone.created_by')

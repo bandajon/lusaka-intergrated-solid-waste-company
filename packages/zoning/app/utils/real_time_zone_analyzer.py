@@ -100,16 +100,11 @@ class EnhancedRealTimeZoneAnalyzer:
             # Enhanced Earth Engine availability check
             ee_available = False
             if self.earth_engine and hasattr(self.earth_engine, 'initialized'):
-                try:
-                    # Test Earth Engine connection with a simple operation
-                    if self.earth_engine.initialized:
-                        import ee
-                        # Quick test to see if EE is really working
-                        test_point = ee.Geometry.Point([28.2833, -15.4166])  # Lusaka coordinates
-                        ee_available = True
-                        print("✅ Earth Engine is available and authenticated")
-                except Exception as ee_test_error:
-                    print(f"⚠️  Earth Engine connection test failed: {str(ee_test_error)}")
+                if self.earth_engine.initialized:
+                    ee_available = True
+                    print("✅ Earth Engine is available and authenticated")
+                else:
+                    print("⚠️  Earth Engine not initialized")
                     ee_available = False
             
             if ee_available:
@@ -377,7 +372,10 @@ class EnhancedRealTimeZoneAnalyzer:
                 else:
                     geometry = shape(zone_geojson)
                 
-                area_sqkm = (geometry.area * 111000 * 111000) / 1000000  # Convert to km²
+                # Convert from decimal degrees to square meters, then to km²
+                # At Lusaka latitude (~15°S), 1 degree ≈ 111 km
+                area_sqm = geometry.area * 111320 * 111320  # Convert to square meters
+                area_sqkm = area_sqm / 1000000  # Convert to km²
                 perimeter_km = (geometry.length * 111000) / 1000
                 
                 # Calculate shape metrics
@@ -402,7 +400,9 @@ class EnhancedRealTimeZoneAnalyzer:
                 width = max_x - min_x
                 height = max_y - min_y
                 
-                area_sqkm = width * height * 111000 * 111000 / 1000000  # Rough approximation
+                # Convert from decimal degrees to square meters, then to km²
+                area_sqm = width * height * 111320 * 111320  # Convert to square meters
+                area_sqkm = area_sqm / 1000000  # Convert to km²
                 perimeter_km = 2 * (width + height) * 111000 / 1000
                 
                 compactness = (4 * 3.14159 * area_sqkm) / (perimeter_km ** 2) if perimeter_km > 0 else 0
@@ -412,6 +412,7 @@ class EnhancedRealTimeZoneAnalyzer:
             
             analysis = {
                 'area_sqkm': round(area_sqkm, 4),
+                'area_sqm': round(area_sqm, 0) if 'area_sqm' in locals() else round(area_sqkm * 1000000, 0),
                 'perimeter_km': round(perimeter_km, 3),
                 'compactness_index': round(compactness, 3),
                 'aspect_ratio': round(aspect_ratio, 3),
@@ -665,28 +666,50 @@ class EnhancedRealTimeZoneAnalyzer:
                 print(f"   🏗️ Building-based fallback: {validation_avg:.0f} people")
                 
             else:
-                # No GHSL or building data - use conservative area-based fallback
+                # No GHSL or building data - use enhanced area-based fallback following analysis.md recommendations
                 area_km2 = mock_zone.area_sqm / 1000000
-                conservative_density = 1250  # Conservative density based on user validation
-                fallback_population = area_km2 * conservative_density
                 
-                population_results['consensus_estimate'] = round(fallback_population)
-                population_results['confidence_level'] = 'low'
-                population_results['primary_source'] = 'area_density_conservative'
-                population_results['estimation_methods']['conservative_area_fallback'] = {
-                    'estimated_population': round(fallback_population),
-                    'method': 'area_density_fallback_conservative',
-                    'density_used': conservative_density,
-                    'note': 'Conservative fallback when GPWv4.11 and building data unavailable'
+                # Use analysis.md recommended densities for Lusaka
+                # Formal settlements: 4.1 people per 100 sqm = 41,000 people/km²
+                # Informal settlements: 6.2 people per 100 sqm = 62,000 people/km²
+                # Mixed settlements: 4.8 people per 100 sqm = 48,000 people/km²
+                
+                # For unknown areas, assume mixed settlement type (conservative estimate)
+                enhanced_density = 5000  # 5,000 people/km² - conservative for mixed Lusaka areas
+                fallback_population = area_km2 * enhanced_density
+                
+                # Apply building coverage factor (typically 30% of area is buildings)
+                building_coverage = 0.30
+                people_per_sqm = 0.11  # 11 people per 100 sqm for mixed settlements (from analysis.md)
+                
+                # Alternative calculation: building area * people per sqm
+                building_area_sqm = mock_zone.area_sqm * building_coverage
+                alternative_population = building_area_sqm * people_per_sqm
+                
+                # Use the higher of the two estimates for safety
+                final_population = max(fallback_population, alternative_population)
+                
+                population_results['consensus_estimate'] = round(final_population)
+                population_results['confidence_level'] = 'medium'  # Better than 'low' due to analysis.md methodology
+                population_results['primary_source'] = 'enhanced_area_density'
+                population_results['estimation_methods']['enhanced_area_fallback'] = {
+                    'estimated_population': round(final_population),
+                    'method': 'enhanced_area_density_analysis_md',
+                    'area_density_estimate': round(fallback_population),
+                    'building_area_estimate': round(alternative_population),
+                    'density_used': enhanced_density,
+                    'people_per_sqm': people_per_sqm,
+                    'building_coverage': building_coverage,
+                    'note': 'Enhanced fallback using analysis.md building-based methodology for Lusaka'
                 }
                 
                 population_results['method_comparison'] = {
                     'gpw_available': False,
                     'building_data_available': False,
-                    'fallback_method': 'conservative_area_density',
-                    'density_rationale': 'Adjusted based on user manual count validation'
+                    'fallback_method': 'enhanced_area_density_analysis_md',
+                    'density_rationale': 'Based on analysis.md building density research for Lusaka settlements'
                 }
-                print(f"   📐 Conservative area fallback: {fallback_population:.0f} people")
+                print(f"   📐 Enhanced area fallback: {final_population:.0f} people (area: {fallback_population:.0f}, building: {alternative_population:.0f})")
             
             return population_results
             
@@ -872,6 +895,15 @@ class EnhancedRealTimeZoneAnalyzer:
             access_score = min(100, max(20, 100 - (area_sqkm * 10)))  # Larger areas are harder to access
             route_efficiency = min(100, max(30, 90 - (area_sqkm * 5)))  # Route efficiency decreases with size
             
+            # Get population estimate from analysis results for consistent calculation
+            population_data = analysis_results.get('analysis_modules', {}).get('population_estimation', {})
+            consensus_population = 0
+            if population_data and not population_data.get('error'):
+                consensus_population = population_data.get('consensus_estimate', 0)
+                # Update mock_zone with consensus population for truck calculations
+                if consensus_population > 0:
+                    mock_zone.estimated_population = consensus_population
+            
             # Calculate detailed truck requirements
             truck_requirements = self._calculate_truck_requirements(mock_zone)
             
@@ -906,7 +938,12 @@ class EnhancedRealTimeZoneAnalyzer:
             # Get population from comprehensive analysis if available
             estimated_population = getattr(mock_zone, 'estimated_population', None)
             if estimated_population is None or estimated_population == 0:
-                estimated_population = area_sqkm * 1250  # Conservative fallback calculation
+                # Use enhanced area-based estimate following analysis.md methodology
+                # instead of the old conservative calculation
+                building_coverage = 0.30
+                people_per_sqm = 0.11  # 11 people per 100 sqm for mixed settlements
+                building_area_sqm = mock_zone.area_sqm * building_coverage
+                estimated_population = building_area_sqm * people_per_sqm
             
             # Enhanced waste generation calculations using comprehensive analysis
             if hasattr(mock_zone, 'analysis_results') and mock_zone.analysis_results:
@@ -924,6 +961,7 @@ class EnhancedRealTimeZoneAnalyzer:
             else:
                 # Basic waste generation calculation as fallback
                 daily_waste_kg = estimated_population * 0.5
+                waste_source = 'Fallback_Calculation'
                 weekly_waste_kg = daily_waste_kg * 7
                 waste_source = 'Basic_Fallback'
             

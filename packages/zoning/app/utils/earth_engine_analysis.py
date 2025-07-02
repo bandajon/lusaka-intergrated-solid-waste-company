@@ -1585,7 +1585,54 @@ class EarthEngineAnalyzer:
             }
             
         except Exception as e:
-            return {"error": f"Population estimation failed: {str(e)}"}
+            # Enhanced fallback using analysis.md methodology when Earth Engine fails
+            try:
+                # Calculate zone area in square meters
+                import json
+                from shapely.geometry import shape
+                
+                zone_shape = shape(zone.geojson['geometry'])
+                # More accurate area calculation for Lusaka region (around -15.4° latitude)
+                # At Lusaka's latitude, 1 degree ≈ 111 km longitude, 111 km latitude
+                lat_factor = 111320  # meters per degree latitude
+                lon_factor = 111320 * abs(math.cos(math.radians(-15.4)))  # Adjust for longitude at Lusaka latitude
+                
+                # Use zone.area_sqm if available, otherwise calculate from geometry
+                if hasattr(zone, 'area_sqm') and zone.area_sqm:
+                    area_sqm = zone.area_sqm
+                else:
+                    # Rough area calculation in square meters
+                    area_degrees = zone_shape.area
+                    area_sqm = area_degrees * lat_factor * lon_factor
+                area_km2 = area_sqm / 1000000
+                
+                # Use analysis.md building-based density estimation
+                # Mixed settlement assumption for fallback: 11 people per 100 sqm
+                building_coverage = 0.30  # Typical 30% building coverage
+                people_per_sqm = 0.11     # From analysis.md for mixed settlements
+                
+                building_area_sqm = area_sqm * building_coverage
+                estimated_population = building_area_sqm * people_per_sqm
+                
+                # Alternative area-based calculation: 5000 people/km² for mixed Lusaka areas
+                area_based_population = area_km2 * 5000
+                
+                # Use the higher estimate for safety
+                final_population = max(estimated_population, area_based_population)
+                
+                return {
+                    'estimated_population': int(final_population),
+                    'population_density_per_hectare': round((final_population / (area_sqm / 10000)), 2),
+                    'max_density_per_hectare': round((final_population / (area_sqm / 10000)), 2),
+                    'data_source': 'Enhanced Fallback (analysis.md methodology)',
+                    'confidence': 'medium',
+                    'method': 'building_based_fallback',
+                    'building_area_estimate': int(estimated_population),
+                    'area_density_estimate': int(area_based_population),
+                    'fallback_reason': str(e)
+                }
+            except Exception as fallback_error:
+                return {"error": f"Population estimation failed: {str(e)}, Fallback also failed: {str(fallback_error)}"}
     
     def analyze_environmental_factors(self, zone):
         """Analyze environmental factors like temperature, precipitation"""

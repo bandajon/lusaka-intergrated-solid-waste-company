@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 from sqlalchemy import func
 from app import db
 from app.models import Zone, User, CSVImport, ZoneAnalysis
+from app.utils.population_service import get_population_service
 
 main_bp = Blueprint('main', __name__)
 
@@ -17,7 +18,26 @@ def index():
     total_zones = Zone.query.count()
     active_zones = Zone.query.filter_by(status='active').count()
     total_area = db.session.query(func.sum(Zone.area_sqm)).scalar() or 0
-    total_population = db.session.query(func.sum(Zone.estimated_population)).scalar() or 0
+    
+    # Prioritize Earth Engine data over database sum
+    saved_population = db.session.query(func.sum(Zone.estimated_population)).scalar() or 0
+    
+    # Use Earth Engine service for consistent population data
+    population_service = get_population_service()
+    
+    if saved_population == 0 and total_area > 0:
+        if population_service.available:
+            # For dashboard display, we could aggregate Earth Engine calls for all zones
+            # For now, show that Earth Engine is preferred
+            total_population = saved_population  # Will be 0, indicating need for Earth Engine data
+            print("Dashboard: Earth Engine available but no zones have population data yet")
+        else:
+            # Only use minimal fallback when Earth Engine completely unavailable
+            fallback = population_service.get_minimal_fallback_estimate(total_area)
+            total_population = fallback['estimated_population'] 
+            print(f"Dashboard using minimal fallback: {total_population} (Earth Engine unavailable)")
+    else:
+        total_population = saved_population
     
     # Recent zones
     recent_zones = Zone.query.order_by(Zone.created_at.desc()).limit(5).all()
