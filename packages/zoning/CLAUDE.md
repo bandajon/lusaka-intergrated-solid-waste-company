@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Flask-based web application for garbage collection zone planning in Lusaka, Zambia. The system allows users to create waste management zones through interactive map drawing or CSV file uploads, and provides advanced analytics using satellite imagery and AI-powered analysis.
+This is a Flask-based web application for garbage collection zone planning in Lusaka, Zambia. The system allows users to create waste management zones through interactive map drawing or CSV file uploads, and provides advanced analytics using satellite imagery and AI-powered analysis. This application is part of the LISWMC (Lusaka Integrated Solid Waste Management Company) monorepo.
 
 ## Quick Start Commands
 
@@ -17,10 +17,13 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Run development server (SQLite)
+# Run development server (SQLite) - Default port 5001
 python run_dev.py
 
-# Run production server (PostgreSQL)
+# Run development server on specific port
+python run_dev.py --port 5002
+
+# Run production server (PostgreSQL) - Default port 5001
 python run.py
 
 # Database operations
@@ -45,6 +48,11 @@ pytest --cov=app
 
 # Run specific test function
 pytest test_phase6_complete.py::test_comprehensive_analysis
+
+# Run phase-specific tests
+pytest test_phase6_complete.py
+pytest test_phase7_ui.py
+pytest test_real_time_zone_analyzer.py
 ```
 
 ## Technology Stack
@@ -59,11 +67,17 @@ pytest test_phase6_complete.py::test_comprehensive_analysis
 
 ## Architecture
 
+### Monorepo Structure
+This application is part of a larger monorepo:
+- `packages/zoning/`: Zone planning and management (this application)
+- `packages/analytics/`: Waste collection analytics and dashboards
+- `packages/shared/`: Shared components (database, auth, utilities)
+
 ### Application Factory Pattern
 The app uses Flask's application factory pattern with blueprints:
 - `app/__init__.py`: Application factory and extension initialization
 - `config/config.py`: Environment-based configuration classes
-- `app/views/`: Route handlers organized by functionality
+- `app/views/`: Route handlers organized by functionality (auth, main, zones, api)
 - `app/models/`: Database models with SQLAlchemy
 
 ### Database Models
@@ -76,6 +90,9 @@ The app uses Flask's application factory pattern with blueprints:
 - `app/utils/earth_engine_analysis.py`: Satellite imagery analysis
 - `app/utils/real_time_zone_analyzer.py`: WebSocket-based real-time analytics
 - `app/utils/population_estimation.py`: Population density calculations
+- `app/utils/websocket_manager.py`: WebSocket connection management
+- `app/utils/validation_framework.py`: Data validation and quality checks
+- `app/utils/visualization_engine.py`: Chart and visualization generation
 
 ## Configuration
 
@@ -149,12 +166,15 @@ longitude,latitude,zone_name,zone_type,description
 - Zone analysis progress tracking
 - Live dashboard updates
 - Multi-user collaboration support
+- Real-time zone analysis during drawing
 
 ### Analytics Engine
 - Population-based waste generation calculations
 - Collection frequency optimization
 - Revenue projections and cost analysis
 - Building classification and density mapping
+- Google Earth Engine integration for satellite imagery analysis
+- AI-powered waste analysis using OpenAI and Anthropic Claude
 
 ## File Structure
 
@@ -180,9 +200,27 @@ uploads/
 
 1. **Setup**: Use `./start.sh` for quick development environment
 2. **Database**: Migrations handled with Flask-Migrate
-3. **Testing**: Comprehensive test suite with pytest
+3. **Testing**: Comprehensive test suite with pytest (40+ specialized test files)
 4. **Credentials**: Service account JSON files in `config/` directory
 5. **Deployment**: Gunicorn-ready with production configuration
+6. **Analytics Integration**: Connects to shared analytics package for data insights
+
+## Common Development Tasks
+
+### Working with Earth Engine
+- Service account authentication required
+- Credentials stored in `config/earth-engine-service-account.json`
+- Test with `pytest test_earth_engine.py`
+
+### Real-time Analysis Testing
+- WebSocket functionality: `pytest test_websocket_real_time.py`
+- Zone analysis: `pytest test_real_time_zone_analyzer.py`
+- Full integration: `pytest test_phase6_complete.py`
+
+### CSV Upload Development
+- Test CSV processing: `pytest test_csv_upload_flow.py`
+- Debug uploads: `pytest test_csv_upload_debug.py`
+- Validation testing: Use sample CSVs in `uploads/temp/`
 
 ## Security Considerations
 
@@ -204,3 +242,33 @@ Development server default login:
 - **Default Zoom**: Level 11
 - **Bounds**: Lusaka metropolitan area
 - **Tile Layer**: OpenStreetMap with Leaflet.js
+
+## Monorepo Integration
+
+### Cross-Package Dependencies
+- **Analytics Package**: Located at `../analytics/`
+- **Shared Package**: Located at `../shared/`
+- **Authentication Bridge**: `analytics_auth_middleware.py` for cross-package auth
+
+### Running Multiple Services
+```bash
+# Start all services from root
+python packages/analytics/start_analytics.py --all
+
+# Start zoning service only
+python packages/zoning/run_dev.py
+
+# Start analytics dashboard
+python packages/analytics/start_analytics.py --dashboard
+```
+
+### Port Configuration
+- **Zoning Service**: 5001 (default)
+- **Analytics Dashboard**: 5007
+- **Analytics Portal**: 5000
+- **Flask Data Management**: 5002
+
+### Database Integration
+- Development: SQLite (`lusaka_zoning_dev.db`)
+- Production: PostgreSQL with PostGIS
+- Analytics: Separate database with bridge connections

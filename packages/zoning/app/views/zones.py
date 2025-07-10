@@ -6,7 +6,7 @@ from app import db
 from app.models import Zone, ZoneTypeEnum, ZoneStatusEnum, ZoneAnalysis
 from app.forms.zone import ZoneForm, CSVUploadForm
 from app.utils.csv_processor import CSVProcessor
-from app.utils.real_time_zone_analyzer import RealTimeZoneAnalyzer
+from app.utils.unified_analyzer import UnifiedAnalyzer, AnalysisRequest, AnalysisType
 import json
 
 zones_bp = Blueprint('zones', __name__)
@@ -559,24 +559,39 @@ def run_analysis(id):
     zone = Zone.query.get_or_404(id)
     
     try:
-        from app.utils.analysis import WasteAnalyzer
+        # Use unified analyzer
+        analyzer = UnifiedAnalyzer()
+        
+        # Create analysis request
+        analysis_request = AnalysisRequest(
+            analysis_type=AnalysisType.COMPREHENSIVE,
+            geometry=zone.geometry,
+            zone_id=str(zone.id),
+            zone_name=zone.name,
+            zone_type=zone.zone_type.value if zone.zone_type else None,
+            options={
+                'include_population': True,
+                'include_buildings': True,
+                'include_waste': True,
+                'include_validation': True
+            }
+        )
         
         # Run analysis
-        analyzer = WasteAnalyzer()
-        results = analyzer.analyze_zone(zone)
+        results = analyzer.analyze(analysis_request)
         
         # Save analysis results
         zone_analysis = ZoneAnalysis(
             zone_id=zone.id,
-            population_density_per_sqkm=results['population_density'],
-            total_waste_generation_kg_day=results['total_waste_generation'],
-            residential_waste_kg_day=results['residential_waste'],
-            commercial_waste_kg_day=results['commercial_waste'],
-            collection_points_required=results['collection_points'],
-            collection_vehicles_required=results['vehicles_required'],
-            projected_monthly_revenue=results['total_revenue'],
-            residential_revenue=results['residential_revenue'],
-            commercial_revenue=results['commercial_revenue'],
+            population_density_per_sqkm=results.population_density or 0,
+            total_waste_generation_kg_day=results.waste_generation_kg_per_day or 0,
+            residential_waste_kg_day=results.waste_generation_kg_per_day * 0.7 if results.waste_generation_kg_per_day else 0,  # Estimate 70% residential
+            commercial_waste_kg_day=results.waste_generation_kg_per_day * 0.3 if results.waste_generation_kg_per_day else 0,  # Estimate 30% commercial
+            collection_points_required=results.collection_requirements.get('collection_points', 1) if results.collection_requirements else 1,
+            collection_vehicles_required=results.collection_requirements.get('vehicles_required', 1) if results.collection_requirements else 1,
+            projected_monthly_revenue=results.collection_requirements.get('monthly_revenue', 0) if results.collection_requirements else 0,
+            residential_revenue=results.collection_requirements.get('monthly_revenue', 0) * 0.7 if results.collection_requirements else 0,
+            commercial_revenue=results.collection_requirements.get('monthly_revenue', 0) * 0.3 if results.collection_requirements else 0,
             created_by=current_user.id
         )
         
@@ -635,21 +650,106 @@ def delete_ajax(id):
 
 @zones_bp.route('/api/analyze-zone', methods=['POST'])
 def analyze_zone():
-    """Real-time analysis of drawn zone using enhanced analyzer"""
+    """Analyze drawn zone and return comprehensive results"""
     try:
         data = request.get_json()
         if not data or 'geometry' not in data:
             return jsonify({'error': 'Invalid zone data'}), 400
         
-        # Initialize the enhanced real-time analyzer
-        from app.utils.real_time_zone_analyzer import EnhancedRealTimeZoneAnalyzer
-        analyzer = EnhancedRealTimeZoneAnalyzer()
+        # Initialize the unified analyzer
+        analyzer = UnifiedAnalyzer()
         
         # Get zone metadata if provided
         zone_metadata = data.get('metadata', {})
         
-        # Perform comprehensive enhanced analysis
-        analysis_results = analyzer.analyze_drawn_zone(data['geometry'], zone_metadata)
+        # Validate and normalize geometry before analysis
+        try:
+            from shapely.geometry import shape, mapping
+            
+            # Handle both GeoJSON Feature and plain geometry
+            geometry_data = data['geometry']
+            if geometry_data.get('type') == 'Feature':
+                geom_data = geometry_data.get('geometry', {})
+            else:
+                geom_data = geometry_data
+            
+            # Validate geometry with Shapely
+            polygon = shape(geom_data)
+            if not polygon.is_valid:
+                polygon = polygon.buffer(0)  # Fix invalid geometry
+            
+            # Use clean geometry for analysis
+            clean_geometry = mapping(polygon)
+            
+        except Exception as geom_error:
+            return jsonify({'error': f'Invalid geometry: {str(geom_error)}'}), 400
+        
+        # Create analysis request with Earth Engine analysis enabled by default
+        analysis_request = AnalysisRequest(
+            analysis_type=AnalysisType.COMPREHENSIVE,
+            geometry=clean_geometry,  # Use validated geometry
+            zone_name=zone_metadata.get('name', 'Drawn Zone'),
+            zone_type=zone_metadata.get('zone_type'),
+            options={
+                'include_population': True,
+                'include_buildings': True,
+                'include_waste': True,
+                'include_validation': True,
+                # Use default confidence threshold from unified analyzer (85%)
+                'use_fallback': zone_metadata.get('use_fallback', False)  # Disable fallback by default
+            }
+        )
+        
+        # Perform comprehensive analysis
+        analysis_result = analyzer.analyze(analysis_request)
+        
+        # Convert result to dictionary format
+        analysis_results = analysis_result.to_dict()
+        
+        # Add additional fields for compatibility
+        analysis_results['optimization_recommendations'] = []
+        analysis_results['zone_viability_score'] = analysis_result.confidence_level or 0
+        analysis_results['critical_issues'] = analysis_result.warnings or []
+        analysis_results['confidence_assessment'] = {
+            'level': analysis_result.confidence_level,
+            'data_sources': analysis_result.data_sources
+        }
+        analysis_results['performance_metrics'] = {}
+        analysis_results['cross_validation'] = {}
+        analysis_results['uncertainty_analysis'] = {}
+        analysis_results['enhanced_estimates_mode'] = True
+        analysis_results['enhanced_components'] = ['unified_analyzer']
+        
+        # Format data structure for frontend compatibility
+        analysis_results['analysis_modules'] = {
+            'geometry': {
+                'area_sqkm': _calculate_area_from_geometry(clean_geometry),
+                'compactness_index': 0.5,  # Default value
+                'perimeter_m': 0,
+                'bounds': {}
+            },
+            'population': {
+                'consensus': analysis_result.population_estimate or 0,
+                'household_count': analysis_result.household_estimate or 0,
+                'confidence': analysis_result.confidence_level or 0,
+                'method': 'unified_analyzer'
+            },
+            'collection_feasibility': {
+                'overall_score': analysis_result.confidence_level or 0,
+                'truck_requirements': {
+                    'truck_10_tonne': 1,  # Default minimum truck requirement
+                    'frequency_per_week': 2,
+                    'total_capacity_needed': (analysis_result.waste_generation_kg_per_day or 0) * 7
+                }
+            },
+            'waste_generation': {
+                'daily_kg': analysis_result.waste_generation_kg_per_day or 0,
+                'weekly_kg': (analysis_result.waste_generation_kg_per_day or 0) * 7,
+                'weekly_tonnes': ((analysis_result.waste_generation_kg_per_day or 0) * 7) / 1000,
+                'population_used': analysis_result.population_estimate or 0,
+                'rate_kg_per_person': 0.5  # Standard Lusaka rate
+            }
+        }
         
         # Persist analysis results for session
         _persist_temporary_analysis(data['geometry'], analysis_results, data.get('session_id'))
@@ -681,44 +781,90 @@ def validate_zone_boundary():
         if not data or 'geometry' not in data:
             return jsonify({'error': 'Invalid zone data'}), 400
         
-        # Use enhanced analyzer for better validation
-        from app.utils.real_time_zone_analyzer import EnhancedRealTimeZoneAnalyzer
-        analyzer = EnhancedRealTimeZoneAnalyzer()
+        # Use unified analyzer for validation
+        analyzer = UnifiedAnalyzer()
         
-        # Quick geometric validation
-        geometry_analysis = analyzer._analyze_geometry(data['geometry'])
+        # Create a minimal analysis request for geometry validation
+        analysis_request = AnalysisRequest(
+            analysis_type=AnalysisType.BUILDINGS,  # Quick analysis type
+            geometry=data['geometry'],
+            options={'confidence_threshold': 0.95}
+        )
         
+        # Perform quick analysis
+        analysis_result = analyzer.analyze(analysis_request)
+        
+        # Extract validation data
         validation_result = {
-            'is_valid': not geometry_analysis.get('error'),
-            'area_sqkm': geometry_analysis.get('area_sqkm', 0),
-            'compactness_score': geometry_analysis.get('shape_quality', {}).get('compactness_score', 0),
-            'size_assessment': geometry_analysis.get('shape_quality', {}).get('size_appropriateness', ''),
+            'is_valid': analysis_result.success,
+            'area_sqkm': 0,  # Will be calculated from geometry
+            'compactness_score': 0.5,  # Default value
+            'size_assessment': 'appropriate',
             'quick_recommendations': []
         }
         
-        # Enhanced recommendations based on geometry
-        area = geometry_analysis.get('area_sqkm', 0)
-        compactness = geometry_analysis.get('compactness_index', 0)
-        aspect_ratio = geometry_analysis.get('aspect_ratio', 1)
-        
-        if area > 5:
-            validation_result['quick_recommendations'].append('Zone is large - consider splitting for better management')
-        elif area < 0.1:
-            validation_result['quick_recommendations'].append('Zone is small - consider merging with adjacent areas')
-        
-        if compactness < 0.3:
-            validation_result['quick_recommendations'].append('Zone shape is not compact - make it more circular for efficient collection')
-        
-        if aspect_ratio > 3:
-            validation_result['quick_recommendations'].append('Zone is too elongated - consider making it more square-shaped')
-        
-        # Add enhanced geometry insights
-        shape_quality = geometry_analysis.get('shape_quality', {})
-        validation_result['shape_insights'] = {
-            'compactness_level': shape_quality.get('compactness_level', 'Unknown'),
-            'size_category': shape_quality.get('size_category', 'Unknown'),
-            'collection_complexity': 'High' if compactness < 0.3 or aspect_ratio > 3 else 'Low'
-        }
+        # Calculate area from geometry if possible
+        try:
+            from shapely.geometry import shape
+            import pyproj
+            from shapely.ops import transform
+            
+            # Handle both GeoJSON Feature and plain geometry
+            geometry_data = data['geometry']
+            if geometry_data.get('type') == 'Feature':
+                geom_data = geometry_data.get('geometry', {})
+            else:
+                geom_data = geometry_data
+            
+            polygon = shape(geom_data)
+            
+            # Convert to UTM for area calculation
+            wgs84 = pyproj.CRS('EPSG:4326')
+            utm35s = pyproj.CRS('EPSG:32735')
+            transformer = pyproj.Transformer.from_crs(wgs84, utm35s, always_xy=True)
+            utm_polygon = transform(transformer.transform, polygon)
+            
+            area_sqkm = utm_polygon.area / 1000000
+            validation_result['area_sqkm'] = area_sqkm
+            
+            # Calculate compactness (Polsby-Popper score)
+            perimeter = utm_polygon.length
+            if perimeter > 0:
+                compactness = (4 * 3.14159 * utm_polygon.area) / (perimeter * perimeter)
+                validation_result['compactness_score'] = compactness
+            
+            # Size assessment
+            if area_sqkm > 5:
+                validation_result['size_assessment'] = 'too_large'
+                validation_result['quick_recommendations'].append('Zone is large - consider splitting for better management')
+            elif area_sqkm < 0.1:
+                validation_result['size_assessment'] = 'too_small'
+                validation_result['quick_recommendations'].append('Zone is small - consider merging with adjacent areas')
+            else:
+                validation_result['size_assessment'] = 'appropriate'
+            
+            # Compactness recommendations
+            if compactness < 0.3:
+                validation_result['quick_recommendations'].append('Zone shape is not compact - make it more circular for efficient collection')
+            
+            # Calculate aspect ratio
+            bounds = utm_polygon.bounds
+            width = bounds[2] - bounds[0]
+            height = bounds[3] - bounds[1]
+            aspect_ratio = max(width, height) / min(width, height) if min(width, height) > 0 else 1
+            
+            if aspect_ratio > 3:
+                validation_result['quick_recommendations'].append('Zone is too elongated - consider making it more square-shaped')
+            
+            # Add shape insights
+            validation_result['shape_insights'] = {
+                'compactness_level': 'Good' if compactness > 0.5 else 'Fair' if compactness > 0.3 else 'Poor',
+                'size_category': validation_result['size_assessment'].replace('_', ' ').title(),
+                'collection_complexity': 'High' if compactness < 0.3 or aspect_ratio > 3 else 'Low'
+            }
+            
+        except Exception as e:
+            print(f"Geometry calculation error: {e}")
         
         return jsonify(validation_result)
         
@@ -734,68 +880,64 @@ def get_dashboard_data():
         if not data or 'analysis' not in data:
             return jsonify({'error': 'Invalid analysis data'}), 400
         
-        # Initialize DashboardCore
-        from app.utils.dashboard_core import DashboardCore
-        dashboard = DashboardCore()
-        
-        # Generate dashboard data from analysis results
+        # Extract data from analysis results
         analysis_data = data['analysis']
-        analysis_modules = analysis_data.get('analysis_modules', {})
         
-        # Extract data from analysis modules
-        population_module = analysis_modules.get('population_estimation', {})
-        waste_module = analysis_modules.get('waste_analysis', {})
-        earth_engine_module = analysis_modules.get('earth_engine', {})
-        geometry_module = analysis_modules.get('geometry', {})
-        
-        # Format data for DashboardCore with proper structure
-        formatted_data = {
-            'zone_id': 'temp_zone',
-            'zone_name': 'Drawing Zone',
-            'analysis_modules': analysis_modules,
-            'geometry_analysis': geometry_module,
-            'population_analysis': population_module,
-            'waste_analysis': waste_module,
-            'earth_engine_analysis': earth_engine_module,
-            'collection_feasibility': analysis_modules.get('collection_feasibility', {}),
-            'zone_viability_score': analysis_data.get('zone_viability_score', 0),
-            'optimization_recommendations': analysis_data.get('optimization_recommendations', []),
-            'critical_issues': analysis_data.get('critical_issues', []),
-            
-            # Add flattened data that DashboardCore expects with best available population source
-            'enhanced_population_estimate': _get_best_population_estimate(
-                population_module, earth_engine_module, waste_module
-            ),
-            'buildings_analysis': {
-                'building_count': earth_engine_module.get('buildings_data', {}).get('building_count', 0),
-                'features': {
-                    'building_density': earth_engine_module.get('buildings_data', {}).get('building_density', 0)
-                },
-                'error': earth_engine_module.get('buildings_data', {}).get('error')
+        # Format dashboard data from analysis results
+        dashboard_data = {
+            'key_metrics': {
+                'estimated_population': analysis_data.get('population_estimate', 0),
+                'daily_waste': analysis_data.get('waste_generation_kg_per_day', 0),
+                'building_count': analysis_data.get('building_count', 0),
+                'trucks_needed': 1  # Default minimum truck requirement
             },
-            'total_waste_kg_day': waste_module.get('total_waste_kg_day', 0),
-            'population_density_per_km2': population_module.get('density_per_sqkm', 0),
-            'collection_points': waste_module.get('optimal_collection_points', 0),
-            'vehicles_required': waste_module.get('trucks_required', 0),
-            'monthly_revenue': waste_module.get('monthly_revenue_kwacha', 0) * 0.045,  # Convert to USD
-            'annual_revenue': waste_module.get('monthly_revenue_kwacha', 0) * 0.045 * 12,
-            
-            # Add the actual values for real-time display
-            'daily_waste': waste_module.get('total_waste_kg_day', 0),
-            'trucks_needed': waste_module.get('trucks_required', 0)
+            'quality_indicators': {
+                'overall_quality': analysis_data.get('confidence_level', 0),
+                'population_confidence': analysis_data.get('confidence_level', 0),
+                'collection_feasibility': analysis_data.get('confidence_level', 0)
+            },
+            'zone_summary': {
+                'estimated_population': analysis_data.get('population_estimate', 0),
+                'household_count': analysis_data.get('household_estimate', 0),
+                'building_count': analysis_data.get('building_count', 0),
+                'waste_generation': analysis_data.get('waste_generation_kg_per_day', 0),
+                'confidence_level': analysis_data.get('confidence_level', 0)
+            },
+            'metrics': {
+                'population_density': analysis_data.get('population_density', 0),
+                'collection_requirements': analysis_data.get('collection_requirements', {}),
+                'viability_score': analysis_data.get('zone_viability_score', 0)
+            }
         }
-        
-        # Generate comprehensive dashboard data
-        dashboard_data = dashboard.generate_zone_overview_dashboard(formatted_data)
-        
-        # Add interactive map data
-        map_data = dashboard.generate_interactive_map_data(formatted_data)
         
         # Prepare visualization data
         visualizations = {
-            'population_heatmap': dashboard.generate_population_heatmap(formatted_data),
-            'waste_charts': dashboard.generate_waste_prediction_charts(formatted_data),
-            'building_visualization': dashboard.generate_building_detection_visualization(formatted_data)
+            'population_heatmap': {
+                'data': [],
+                'type': 'heatmap'
+            },
+            'waste_charts': {
+                'data': {
+                    'daily_waste': analysis_data.get('waste_generation_kg_per_day', 0),
+                    'weekly_waste': analysis_data.get('waste_generation_kg_per_day', 0) * 7,
+                    'monthly_waste': analysis_data.get('waste_generation_kg_per_day', 0) * 30
+                },
+                'type': 'bar_chart'
+            },
+            'building_visualization': {
+                'data': {
+                    'total_buildings': analysis_data.get('building_count', 0),
+                    'building_types': analysis_data.get('building_types', {})
+                },
+                'type': 'pie_chart'
+            }
+        }
+        
+        # Map data for visualization
+        map_data = {
+            'center': current_app.config.get('DEFAULT_MAP_CENTER', [-15.4167, 28.2833]),
+            'zoom': current_app.config.get('DEFAULT_MAP_ZOOM', 12),
+            'zone_data': data.get('analysis', {})
         }
         
         return jsonify({
@@ -865,7 +1007,6 @@ def _estimate_population_for_zone(zone):
     try:
         from app.utils.population_estimation import PopulationEstimator
         from app.utils.earth_engine_analysis import EarthEngineAnalyzer
-        from app.utils.analysis import WasteAnalyzer
         import pandas as pd
         
         results = {
@@ -892,9 +1033,8 @@ def _estimate_population_for_zone(zone):
         
         # Method 2: Building-based Population Estimation (if building data exists)
         try:
-            analyzer = WasteAnalyzer()
             # Try to get building data for the zone
-            buildings_data = analyzer.earth_engine.get_building_footprints(zone) if hasattr(analyzer, 'earth_engine') and analyzer.earth_engine.initialized else None
+            buildings_data = earth_engine.get_building_footprints(zone) if earth_engine.initialized else None
             
             if buildings_data and not buildings_data.get('error'):
                 # Create mock building DataFrame for PopulationEstimator
@@ -1047,6 +1187,28 @@ def _assess_agreement_level(estimates):
         return 'poor'
 
 
+def _calculate_area_from_geometry(geometry):
+    """Calculate area in square kilometers from geometry"""
+    try:
+        from shapely.geometry import shape
+        
+        # Handle both GeoJSON Feature and plain geometry
+        if geometry.get('type') == 'Feature':
+            geom_data = geometry.get('geometry', {})
+        else:
+            geom_data = geometry
+        
+        # Convert to shapely geometry and calculate area
+        geom = shape(geom_data)
+        area_sqm = geom.area * 111320 ** 2  # Convert degrees to square meters
+        area_sqkm = area_sqm / 1_000_000  # Convert to square kilometers
+        
+        return area_sqkm
+    except Exception as e:
+        print(f"Warning: Could not calculate area from geometry: {str(e)}")
+        return 0.0
+
+
 def _persist_temporary_analysis(geometry, analysis_results, session_id=None):
     """Persist analysis results for temporary zones during drawing"""
     try:
@@ -1073,19 +1235,23 @@ def _persist_temporary_analysis(geometry, analysis_results, session_id=None):
         ).first()
         
         if existing:
-            # Update existing analysis
+            # Update existing analysis with correct keys
             existing.analysis_data = analysis_results
+            existing.estimated_population = analysis_results.get('population_estimate', 0)
+            existing.total_waste_kg_day = analysis_results.get('waste_generation_kg_per_day', 0)
+            existing.area_sqkm = _calculate_area_from_geometry(geometry)
+            existing.viability_score = analysis_results.get('zone_viability_score', 0)
             existing.created_at = datetime.utcnow()
             existing.expires_at = datetime.utcnow() + timedelta(hours=24)
         else:
-            # Create new temporary analysis
+            # Create new temporary analysis with correct keys from unified analyzer
             temp_analysis = TemporaryZoneAnalysis(
                 session_id=session_id,
                 geometry_hash=geometry_hash,
                 analysis_data=analysis_results,
-                estimated_population=analysis_results.get('population_analysis', {}).get('total_population', 0),
-                total_waste_kg_day=analysis_results.get('waste_analysis', {}).get('total_waste_generation_kg_day', 0),
-                area_sqkm=analysis_results.get('geometry_analysis', {}).get('area_sqkm', 0),
+                estimated_population=analysis_results.get('population_estimate', 0),
+                total_waste_kg_day=analysis_results.get('waste_generation_kg_per_day', 0),
+                area_sqkm=_calculate_area_from_geometry(geometry),
                 viability_score=analysis_results.get('zone_viability_score', 0),
                 created_by=current_user.id if current_user.is_authenticated else None,
                 expires_at=datetime.utcnow() + timedelta(hours=24)

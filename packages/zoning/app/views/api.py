@@ -5,7 +5,7 @@ from sqlalchemy import func
 import json
 from app import db
 from app.models import Zone, ZoneAnalysis, CSVImport, User
-from app.utils.analysis import WasteAnalyzer
+from app.utils.unified_analyzer import UnifiedAnalyzer, AnalysisRequest, AnalysisType
 
 api_bp = Blueprint('api', __name__)
 
@@ -182,19 +182,36 @@ def analyze_zone(zone_id):
     """Run analysis on zone"""
     zone = Zone.query.get_or_404(zone_id)
     
-    # Run waste analysis
-    analyzer = WasteAnalyzer()
-    results = analyzer.analyze_zone(zone)
+    # Run analysis using unified analyzer
+    analyzer = UnifiedAnalyzer()
+    
+    # Create analysis request
+    analysis_request = AnalysisRequest(
+        analysis_type=AnalysisType.COMPREHENSIVE,
+        geometry=zone.geometry,
+        zone_id=str(zone.id),
+        zone_name=zone.name,
+        zone_type=zone.zone_type.value if zone.zone_type else None,
+        options={
+            'include_population': True,
+            'include_buildings': True,
+            'include_waste': True,
+            'include_validation': True
+        }
+    )
+    
+    # Run analysis
+    results = analyzer.analyze(analysis_request)
     
     # Store analysis results
     analysis = ZoneAnalysis(
         zone_id=zone.id,
-        total_waste_generation_kg_day=results['total_waste_kg_day'],
-        residential_waste_kg_day=results['residential_waste'],
-        commercial_waste_kg_day=results['commercial_waste'],
-        collection_points_required=results['collection_points'],
-        collection_vehicles_required=results['vehicles_required'],
-        projected_monthly_revenue=results['monthly_revenue'],
+        total_waste_generation_kg_day=results.waste_generation_kg_per_day or 0,
+        residential_waste_kg_day=(results.waste_generation_kg_per_day or 0) * 0.7,  # Estimate 70% residential
+        commercial_waste_kg_day=(results.waste_generation_kg_per_day or 0) * 0.3,  # Estimate 30% commercial
+        collection_points_required=results.collection_requirements.get('collection_points', 1) if results.collection_requirements else 1,
+        collection_vehicles_required=results.collection_requirements.get('vehicles_required', 1) if results.collection_requirements else 1,
+        projected_monthly_revenue=results.collection_requirements.get('monthly_revenue', 0) if results.collection_requirements else 0,
         created_by=current_user.id
     )
     
@@ -203,7 +220,7 @@ def analyze_zone(zone_id):
     
     return jsonify({
         'analysis_id': analysis.id,
-        'results': results
+        'results': results.to_dict()
     })
 
 
