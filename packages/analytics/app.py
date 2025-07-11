@@ -1,9 +1,10 @@
-from flask import Flask, render_template, redirect, url_for, send_from_directory
+from flask import Flask, render_template, redirect, url_for, send_from_directory, session, request, jsonify
 from datetime import datetime
 import os
 import logging
 import sys
 from pathlib import Path
+from functools import wraps
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -11,6 +12,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Add current directory to Python path for imports
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir))
+
+# Import authentication components
+from auth import auth_manager
+from session_bridge import session_bridge
 
 # Import database manager and plate cleaner utilities
 try:
@@ -38,6 +43,61 @@ app.config['DB_PORT'] = 5432
 # Create uploads directory if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+# Authentication decorator
+def require_login(f):
+    """Decorator to require login for protected routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check for session-based auth
+        if 'user_id' in session:
+            return f(*args, **kwargs)
+        
+        # Check for shared session token
+        shared_token = request.args.get('analytics_token') or request.cookies.get('analytics_token')
+        if shared_token:
+            user_data = session_bridge.get_session(shared_token)
+            if user_data:
+                # Set up session
+                session['user_id'] = user_data['user_id']
+                session['username'] = user_data['username']
+                session['full_name'] = user_data['full_name']
+                session['email'] = user_data['email']
+                session['role'] = user_data['role']
+                return f(*args, **kwargs)
+        
+        # No valid authentication, redirect to portal login
+        return redirect('http://localhost:5005/login?next=' + request.url)
+    
+    return decorated_function
+
+# Apply authentication to all routes
+@app.before_request
+def check_authentication():
+    """Check authentication for all routes except public ones"""
+    # List of public endpoints that don't require authentication
+    public_endpoints = ['static', 'health_check']
+    
+    if request.endpoint and request.endpoint.split('.')[-1] not in public_endpoints:
+        # Check for authentication
+        if 'user_id' not in session:
+            # Check for shared session token
+            shared_token = request.args.get('analytics_token') or request.cookies.get('analytics_token')
+            if shared_token:
+                user_data = session_bridge.get_session(shared_token)
+                if user_data:
+                    # Set up session
+                    session['user_id'] = user_data['user_id']
+                    session['username'] = user_data['username']
+                    session['full_name'] = user_data['full_name']
+                    session['email'] = user_data['email']
+                    session['role'] = user_data['role']
+                else:
+                    # Invalid token, redirect to login
+                    return redirect('http://localhost:5005/login?next=' + request.url)
+            else:
+                # No authentication, redirect to login
+                return redirect('http://localhost:5005/login?next=' + request.url)
+
 # Register routes
 try:
     from flask_app.routes import main_bp
@@ -57,6 +117,7 @@ def serve_dashboard_assets(filename):
 
 # Create test pages to check if routing works properly
 @app.route('/dashboard-test')
+@require_login
 def dashboard_test():
     """Test page that links to the dashboard"""
     return """
@@ -110,6 +171,7 @@ def dashboard_test():
     """
 
 @app.route('/simple-dashboard')
+@require_login
 def simple_dashboard():
     """A simple dashboard page with direct navigation links"""
     weigh_events_url = "/dashboards/weigh_events/"
@@ -164,9 +226,28 @@ def simple_dashboard():
 
 # Direct redirect to weigh events dashboard
 @app.route('/direct-to-weigh-events')
+@require_login
 def direct_to_weigh_events():
     """Direct redirect to the weigh events dashboard"""
     return redirect('/dashboards/weigh_events/')
+
+# Health check endpoint (public)
+@app.route('/health')
+def health_check():
+    """Simple health check endpoint"""
+    try:
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'service': 'data-management',
+            'version': '1.0.0'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 # Register Dash app - do this after defining routes for simplicity
 from flask_app.dashboards.weigh_events_dashboard import dash_app as weigh_events_dash
@@ -203,12 +284,17 @@ app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {
 # Add jinja2 global variables
 @app.context_processor
 def inject_globals():
-    return dict(now=datetime.now())
+    return dict(
+        now=datetime.now(),
+        user=session.get('username', 'Guest'),
+        full_name=session.get('full_name', ''),
+        role=session.get('role', 'user')
+    )
 
-# Simple redirect to dashboard test page
+# Simple redirect to main app
 @app.route('/')
 def index_redirect():
-    return redirect(url_for('dashboard_test'))
+    return redirect(url_for('main.index'))
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5002)

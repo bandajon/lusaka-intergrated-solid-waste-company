@@ -6,14 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Development
 - Install dependencies: `pip install -r requirements.txt`
-- **Unified Startup (Recommended)**: `python start_analytics.py [--portal|--dashboard|--flask|--zoning|--both|--all]`
-- Run unified portal: `python start_analytics.py --portal` (available at http://localhost:5000)
-- Run main analytics dashboard: `python db_dashboard.py` (available at http://localhost:5007)
-- Run Flask data management app: `python flask_app/run.py` (available at http://localhost:5002)
-- Run zoning service: `python start_analytics.py --zoning` (available at http://localhost:5001)
-- Start analytics services: `python start_analytics.py --both`
-- **Start all services**: `python start_analytics.py --all` (complete platform)
-- Run specific dashboards: `./run_db_dashboard.sh`, `./run_weigh_dashboard.sh`
+- **Unified Platform Startup (RECOMMENDED)**: `python start_platform.py --all` (from project root)
+- **Complete Platform**: `python start_platform.py --all` (all services)
+- **Analytics Suite Only**: `python start_platform.py --analytics` (dashboard + flask + qr)
+- **Individual Services**:
+  - Analytics Dashboard: `python start_platform.py --dashboard` (port 5007)
+  - Data Management: `python start_platform.py --flask` (port 5002)
+  - QR Code Service: `python start_platform.py --qr` (port 5003)
+  - Zoning Service: `python start_platform.py --zoning` (port 5001)
+  - Unified Portal: `python start_platform.py --portal` (port 5005)
+- **Legacy Analytics Startup**: `python packages/analytics/start_analytics.py [--portal|--dashboard|--flask|--qr|--zoning|--both|--all]`
 
 ### Testing
 - **Unified Testing**: `python start_analytics.py --test` or `python start_analytics.py --company-test`

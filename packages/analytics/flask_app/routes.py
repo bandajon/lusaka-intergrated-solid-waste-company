@@ -265,11 +265,16 @@ def db_stats():
         flash(f'Error getting database statistics: {str(e)}', 'danger')
         return redirect(url_for('main.index'))
 
+@main_bp.route('/dashboard')
+def dashboard():
+    """Dashboard route - redirect to main index"""
+    return redirect(url_for('main.index'))
+
 @main_bp.route('/analytics')
 def analytics_dashboard():
     """Redirect to the standalone analytics dashboard"""
-    # Redirect to the standalone dashboard running on port 5006
-    return redirect('http://localhost:5006/')
+    # Redirect to the standalone dashboard running on port 5007
+    return redirect('http://localhost:5007/')
 
 @main_bp.route('/companies/unify')
 def company_unify():

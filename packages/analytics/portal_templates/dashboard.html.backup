@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LISWMC Portal - Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .applications-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 25px;
+            margin-top: 30px;
+        }
+        
+        .app-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+            transition: all 0.3s ease;
+            border: 1px solid #e0e0e0;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .app-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+            border-color: #2e7d32;
+        }
+        
+        .app-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .app-icon {
+            font-size: 36px;
+            margin-right: 15px;
+        }
+        
+        .app-title {
+            flex: 1;
+        }
+        
+        .app-title h3 {
+            margin: 0;
+            color: #1a1a1a;
+            font-size: 20px;
+        }
+        
+        .app-description {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        
+        .app-features {
+            margin-bottom: 20px;
+        }
+        
+        .app-features h4 {
+            color: #333;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .app-features ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .app-features li {
+            color: #555;
+            font-size: 14px;
+            padding: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .app-features li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #2e7d32;
+            font-weight: bold;
+        }
+        
+        .app-action {
+            display: block;
+            background: #2e7d32;
+            color: white;
+            text-align: center;
+            padding: 12px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.3s ease;
+        }
+        
+        .app-action:hover {
+            background: #1b5e20;
+        }
+        
+        .app-card.admin-only {
+            border-color: #ff9800;
+        }
+        
+        .app-card.admin-only .app-header {
+            border-bottom-color: #ffe0b2;
+        }
+        
+        .app-card.admin-only::before {
+            content: "Admin Only";
+            position: absolute;
+            top: 10px;
+            right: -30px;
+            background: #ff9800;
+            color: white;
+            padding: 5px 40px;
+            font-size: 12px;
+            transform: rotate(45deg);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        
+        .welcome-section {
+            background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+        
+        .welcome-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .welcome-text h2 {
+            margin: 0 0 10px 0;
+            font-size: 28px;
+        }
+        
+        .welcome-text p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        
+        .welcome-stats {
+            display: flex;
+            gap: 30px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .role-badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        
+        .permissions-notice {
+            background: #f5f5f5;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        
+        .permissions-notice h4 {
+            margin: 0 0 10px 0;
+            color: #ff6f00;
+        }
+        
+        .permissions-notice p {
+            margin: 0;
+            color: #666;
+        }
+        
+        @media (max-width: 768px) {
+            .applications-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .welcome-content {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .welcome-stats {
+                margin-top: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1>🏢 LISWMC Analytics Portal</h1>
+            <div class="nav-links">
+                <a href="{{ url_for('dashboard') }}" class="active">Dashboard</a>
+                <a href="{{ url_for('profile') }}">Profile</a>
+                {% if permission_manager.has_permission(user.role, ServicePermission.USER_VIEW) %}
+                <a href="{{ url_for('admin_users') }}">Users</a>
+                {% endif %}
+                <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <!-- Welcome Section -->
+        <div class="welcome-section">
+            <div class="welcome-content">
+                <div class="welcome-text">
+                    <h2>Welcome, {{ user.full_name or user.username }}!
+                        <span class="role-badge">{{ user.role_display }}</span>
+                    </h2>
+                    <p>Access your analytics applications from one central location</p>
+                </div>
+                <div class="welcome-stats">
+                    <div class="stat-item">
+                        <span class="stat-value">{{ permissions_summary.accessible_services }}</span>
+                        <span class="stat-label">Available Services</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">{{ permissions_summary.total_services }}</span>
+                        <span class="stat-label">Total Services</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        {% if permissions_summary.accessible_services < permissions_summary.total_services %}
+        <div class="permissions-notice">
+            <h4>Limited Access</h4>
+            <p>You have access to {{ permissions_summary.accessible_services }} out of {{ permissions_summary.total_services }} available services based on your {{ user.role_display }} role. Contact an administrator if you need additional access.</p>
+        </div>
+        {% endif %}
+        
+        <!-- Applications Grid -->
+        <div class="applications-grid">
+            {% for app in applications %}
+            <div class="app-card {% if app.id == 'user_management' %}admin-only{% endif %}">
+                <div class="app-header">
+                    <div class="app-icon">{{ app.icon }}</div>
+                    <div class="app-title">
+                        <h3>{{ app.name }}</h3>
+                    </div>
+                </div>
+                
+                <p class="app-description">{{ app.description }}</p>
+                
+                <div class="app-features">
+                    <h4>Features</h4>
+                    <ul>
+                        {% for feature in app.features[:3] %}
+                        <li>{{ feature }}</li>
+                        {% endfor %}
+                        {% if app.features|length > 3 %}
+                        <li>And {{ app.features|length - 3 }} more...</li>
+                        {% endif %}
+                    </ul>
+                </div>
+                
+                <a href="{{ app.url }}" class="app-action" target="_blank">
+                    Open {{ app.name }} →
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+        
+        {% if applications|length == 0 %}
+        <div style="text-align: center; padding: 60px 20px; color: #666;">
+            <h3>No Services Available</h3>
+            <p>Your current role doesn't have access to any services. Please contact an administrator.</p>
+        </div>
+        {% endif %}
+        
+        <!-- Additional Information -->
+        <div style="margin-top: 40px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+            <h3 style="margin-top: 0;">Quick Access Information</h3>
+            <ul style="color: #666; line-height: 1.8;">
+                <li><strong>Single Sign-On:</strong> You're automatically logged into all services you access from here</li>
+                <li><strong>Session Duration:</strong> Your session will remain active for 8 hours</li>
+                <li><strong>Role Permissions:</strong> Your {{ user.role_display }} role determines which services you can access</li>
+                {% if permissions_summary.can_manage_users %}
+                <li><strong>User Management:</strong> You can manage user accounts from the Users section</li>
+                {% endif %}
+                {% if permissions_summary.can_export_data %}
+                <li><strong>Data Export:</strong> You have permission to export data from the analytics services</li>
+                {% endif %}
+                {% if permissions_summary.can_manage_zones %}
+                <li><strong>Zone Management:</strong> You can create and edit geographic zones in the Zoning Service</li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-refresh session every 30 minutes to keep it alive
+        setInterval(function() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => console.log('Session refreshed'));
+        }, 30 * 60 * 1000);
+    </script>
+</body>
+</html>

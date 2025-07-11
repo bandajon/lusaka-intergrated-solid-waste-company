@@ -10,15 +10,25 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add current directory to path for imports
 current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir))
 
+# Add shared directory to path for auth imports
+shared_dir = Path(__file__).resolve().parent.parent / 'shared'
+sys.path.insert(0, str(shared_dir))
+
 # Import existing authentication system
 from auth import auth_manager
+from role_permissions import permission_manager, ServicePermission
 from session_bridge import session_bridge
 from config import AnalyticsConfig
+from qr_code_service import qr_service
 
 app = Flask(__name__, 
            template_folder='portal_templates',
@@ -46,17 +56,22 @@ def require_login(f):
     decorated_function.__name__ = f.__name__
     return decorated_function
 
-def require_admin(f):
-    """Decorator to require admin role"""
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        if session.get('role') != 'admin':
-            flash('Access denied. Admin privileges required.', 'error')
-            return redirect(url_for('dashboard'))
-        return f(*args, **kwargs)
-    decorated_function.__name__ = f.__name__
-    return decorated_function
+def require_permission(permission: ServicePermission):
+    """Decorator to require specific permission"""
+    def decorator(f):
+        def decorated_function(*args, **kwargs):
+            if 'user_id' not in session:
+                return redirect(url_for('login'))
+            
+            user_role = session.get('role', 'viewer')
+            if not permission_manager.has_permission(user_role, permission):
+                flash('Access denied. Insufficient permissions.', 'error')
+                return redirect(url_for('dashboard'))
+            
+            return f(*args, **kwargs)
+        decorated_function.__name__ = f.__name__
+        return decorated_function
+    return decorator
 
 @app.route('/')
 def index():
@@ -92,7 +107,10 @@ def login():
             session_token = session_bridge.create_session(user_data)
             session['shared_session_token'] = session_token
             
-            flash(f'Welcome back, {user_data["full_name"] or user_data["username"]}!', 'success')
+            # Get role display name
+            role_display = permission_manager.get_role_display_name(user_data['role'])
+            
+            flash(f'Welcome back, {user_data["full_name"] or user_data["username"]}! Logged in as {role_display}.', 'success')
             return redirect(url_for('dashboard'))
         else:
             flash(message, 'error')
@@ -122,11 +140,19 @@ def dashboard():
         'full_name': session.get('full_name'),
         'email': session.get('email'),
         'role': session.get('role'),
+        'role_display': permission_manager.get_role_display_name(session.get('role', 'viewer')),
         'login_time': session.get('login_time')
     }
     
-    # Define available applications
-    applications = [
+    # Get the shared session token for SSO
+    shared_token = session.get('shared_session_token', '')
+    
+    # Get accessible services for the user's role
+    user_role = session.get('role', 'viewer')
+    accessible_services = permission_manager.get_accessible_services(user_role)
+    
+    # Define available applications with permission checks
+    all_applications = [
         {
             'id': 'analytics_dashboard',
             'name': 'Analytics Dashboard',
@@ -140,13 +166,14 @@ def dashboard():
                 'Location-based insights',
                 'Fee calculation and reporting'
             ],
-            'status': 'active'
+            'required_permission': ServicePermission.ANALYTICS_VIEW,
+            'accessible': accessible_services.get('analytics', False)
         },
         {
             'id': 'data_management',
             'name': 'Data Management',
             'description': 'File upload, processing, and database management',
-            'url': f'http://localhost:{AnalyticsConfig.FLASK_PORT}',
+            'url': f'http://localhost:{AnalyticsConfig.FLASK_PORT}?analytics_token={shared_token}',
             'icon': '🔧',
             'features': [
                 'File upload and processing',
@@ -154,13 +181,14 @@ def dashboard():
                 'Database import/export',
                 'CSV processing utilities'
             ],
-            'status': 'active'
+            'required_permission': ServicePermission.DATA_VIEW,
+            'accessible': accessible_services.get('data_management', False)
         },
         {
             'id': 'company_unification',
             'name': 'Company Unification',
             'description': 'Identify and merge duplicate company entries',
-            'url': f'http://localhost:{AnalyticsConfig.FLASK_PORT}/companies/unify',
+            'url': f'http://localhost:{AnalyticsConfig.FLASK_PORT}/companies/unify?analytics_token={shared_token}',
             'icon': '🏢',
             'features': [
                 'Duplicate company detection',
@@ -168,13 +196,14 @@ def dashboard():
                 'Database cascading merges',
                 'Billing accuracy improvement'
             ],
-            'status': 'active'
+            'required_permission': ServicePermission.COMPANY_UNIFY,
+            'accessible': permission_manager.has_permission(user_role, ServicePermission.COMPANY_UNIFY)
         },
         {
             'id': 'zoning_service',
             'name': 'Zoning Service',
             'description': 'Geographic zone management and GIS analytics',
-            'url': f'http://localhost:5001/auth/sso?analytics_token={session.get("shared_session_token", "")}',
+            'url': f'http://localhost:5001/auth/sso?analytics_token={shared_token}',
             'icon': '🗺️',
             'features': [
                 'Geographic zone management',
@@ -183,7 +212,23 @@ def dashboard():
                 'GIS analytics and reporting',
                 'Google Earth Engine integration'
             ],
-            'status': 'active'
+            'required_permission': ServicePermission.ZONING_VIEW,
+            'accessible': accessible_services.get('zoning', False)
+        },
+        {
+            'id': 'company_qr_codes',
+            'name': 'Company QR Codes',
+            'description': 'Generate and email QR codes for companies',
+            'url': '/company-qr-codes',
+            'icon': '📱',
+            'features': [
+                'Company lookup and search',
+                'QR code generation',
+                'Email delivery to companies',
+                'Digital company identification'
+            ],
+            'required_permission': ServicePermission.COMPANY_QR,
+            'accessible': permission_manager.has_permission(user_role, ServicePermission.COMPANY_QR)
         },
         {
             'id': 'user_management',
@@ -197,13 +242,27 @@ def dashboard():
                 'Account security monitoring',
                 'Activity logging'
             ],
-            'status': 'admin_only'
+            'required_permission': ServicePermission.USER_VIEW,
+            'accessible': accessible_services.get('user_management', False)
         }
     ]
+    
+    # Filter applications based on accessibility
+    applications = [app for app in all_applications if app['accessible']]
+    
+    # Get permission summary for the user
+    permissions_summary = {
+        'total_services': len(all_applications),
+        'accessible_services': len(applications),
+        'can_manage_users': permission_manager.has_permission(user_role, ServicePermission.USER_CREATE),
+        'can_export_data': permission_manager.has_permission(user_role, ServicePermission.DATA_EXPORT),
+        'can_manage_zones': permission_manager.has_permission(user_role, ServicePermission.ZONING_CREATE),
+    }
     
     return render_template('dashboard.html', 
                          user=user_data, 
                          applications=applications,
+                         permissions_summary=permissions_summary,
                          config=AnalyticsConfig)
 
 @app.route('/profile')
@@ -216,6 +275,7 @@ def profile():
         'full_name': session.get('full_name'),
         'email': session.get('email'),
         'role': session.get('role'),
+        'role_display': permission_manager.get_role_display_name(session.get('role', 'viewer')),
         'login_time': session.get('login_time')
     }
     
@@ -224,33 +284,60 @@ def profile():
     if detailed_user:
         user_data.update(detailed_user)
     
-    return render_template('profile.html', user=user_data)
+    # Get user permissions
+    user_role = session.get('role', 'viewer')
+    user_permissions = permission_manager.get_role_permissions(user_role)
+    accessible_services = permission_manager.get_accessible_services(user_role)
+    
+    return render_template('profile.html', 
+                         user=user_data,
+                         permissions=user_permissions,
+                         accessible_services=accessible_services)
 
 @app.route('/admin/users')
-@require_admin
+@require_permission(ServicePermission.USER_VIEW)
 def admin_users():
     """Admin page for user management"""
     users = auth_manager.list_users()
-    return render_template('admin_users.html', users=users)
+    available_roles = permission_manager.get_available_roles()
+    
+    # Check if user can create/edit users
+    user_role = session.get('role', 'viewer')
+    can_create = permission_manager.has_permission(user_role, ServicePermission.USER_CREATE)
+    can_edit = permission_manager.has_permission(user_role, ServicePermission.USER_EDIT)
+    can_delete = permission_manager.has_permission(user_role, ServicePermission.USER_DELETE)
+    
+    return render_template('admin_users.html', 
+                         users=users,
+                         available_roles=available_roles,
+                         can_create=can_create,
+                         can_edit=can_edit,
+                         can_delete=can_delete)
 
 @app.route('/admin/create_user', methods=['POST'])
-@require_admin
+@require_permission(ServicePermission.USER_CREATE)
 def admin_create_user():
-    """Create a new user (admin only)"""
+    """Create a new user (requires USER_CREATE permission)"""
     username = request.form.get('username', '').strip()
     password = request.form.get('password', '')
     full_name = request.form.get('full_name', '').strip()
     email = request.form.get('email', '').strip()
-    role = request.form.get('role', 'user')
+    role = request.form.get('role', 'viewer')
     
     if not username or not password:
         flash('Username and password are required', 'error')
         return redirect(url_for('admin_users'))
     
+    # Validate role
+    valid_roles = [r['value'] for r in permission_manager.get_available_roles()]
+    if role not in valid_roles:
+        flash('Invalid role selected', 'error')
+        return redirect(url_for('admin_users'))
+    
     success, message = auth_manager.create_user(username, password, full_name, email, role)
     
     if success:
-        flash(f'User {username} created successfully', 'success')
+        flash(f'User {username} created successfully with role: {permission_manager.get_role_display_name(role)}', 'success')
     else:
         flash(f'Error creating user: {message}', 'error')
     
@@ -325,6 +412,68 @@ def change_password():
     
     return redirect(url_for('profile'))
 
+@app.route('/company-qr-codes')
+@require_permission(ServicePermission.COMPANY_QR)
+def company_qr_codes():
+    """Company QR codes page"""
+    search_term = request.args.get('search', '')
+    companies = qr_service.get_companies(search_term if search_term else None)
+    
+    return render_template('company_qr_codes.html', 
+                         companies=companies, 
+                         search_term=search_term)
+
+@app.route('/api/generate-qr-code', methods=['POST'])
+@require_permission(ServicePermission.COMPANY_QR)
+def generate_qr_code():
+    """Generate QR code for a company"""
+    try:
+        company_id = request.form.get('company_id')
+        if not company_id:
+            return jsonify({'success': False, 'error': 'Company ID is required'})
+        
+        company_data = qr_service.get_company_by_id(company_id)
+        if not company_data:
+            return jsonify({'success': False, 'error': 'Company not found'})
+        
+        qr_result = qr_service.generate_qr_code(company_data)
+        
+        if qr_result['success']:
+            return jsonify({
+                'success': True,
+                'qr_code': qr_result['qr_code_base64'],
+                'company_name': company_data['company_name']
+            })
+        else:
+            return jsonify({'success': False, 'error': qr_result['error']})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/email-qr-code', methods=['POST'])
+@require_permission(ServicePermission.COMPANY_QR)
+def email_qr_code():
+    """Email QR code to company"""
+    try:
+        company_id = request.form.get('company_id')
+        if not company_id:
+            return jsonify({'success': False, 'error': 'Company ID is required'})
+        
+        company_data = qr_service.get_company_by_id(company_id)
+        if not company_data:
+            return jsonify({'success': False, 'error': 'Company not found'})
+        
+        qr_result = qr_service.generate_qr_code(company_data)
+        if not qr_result['success']:
+            return jsonify({'success': False, 'error': qr_result['error']})
+        
+        email_result = qr_service.send_qr_code_email(company_data, qr_result)
+        
+        return jsonify(email_result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.context_processor
 def inject_globals():
     """Inject global variables into templates"""
@@ -334,8 +483,11 @@ def inject_globals():
         'user': {
             'username': session.get('username'),
             'full_name': session.get('full_name'),
-            'role': session.get('role')
-        } if 'user_id' in session else None
+            'role': session.get('role'),
+            'role_display': permission_manager.get_role_display_name(session.get('role', 'viewer'))
+        } if 'user_id' in session else None,
+        'permission_manager': permission_manager,
+        'ServicePermission': ServicePermission
     }
 
 if __name__ == '__main__':
@@ -345,6 +497,10 @@ if __name__ == '__main__':
     print(f"📊 Analytics Dashboard: {AnalyticsConfig.get_dash_url()}")
     print(f"🔧 Data Management: {AnalyticsConfig.get_flask_url()}")
     print(f"🗺️  Zoning Service: http://localhost:5001")
+    print("=" * 50)
+    print("\n📋 Available Roles:")
+    for role in permission_manager.get_available_roles():
+        print(f"   • {role['name']}: {role['description']}")
     print("=" * 50)
     
     app.run(

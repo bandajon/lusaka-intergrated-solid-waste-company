@@ -3883,4 +3883,6 @@ if __name__ == '__main__':
     debug_print("Starting Database-Connected Analytics Dashboard...")
     debug_print(f"Dashboard will be available at: http://{host}:{port}/")
     debug_print(f"Debug mode: {debug_mode}")
-    app.run(debug=debug_mode, port=port, host=host)
+    
+    # Disable reloader to avoid termios error
+    app.run(debug=debug_mode, port=port, host=host, use_reloader=False)
