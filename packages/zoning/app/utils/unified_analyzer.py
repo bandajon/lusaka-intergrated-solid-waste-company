@@ -124,8 +124,44 @@ class AnalysisResult:
             'data_sources': self.data_sources,
             'validation_metrics': self.validation_metrics,
             'error_message': self.error_message,
-            'warnings': self.warnings
+            'warnings': self.warnings,
+            'performance_metrics': {
+                'total_analysis_time_seconds': getattr(self, '_execution_time', 0.1),
+                'modules_completed': 3 if self.success else 0,
+                'modules_total': 3
+            },
+            'critical_issues': self._get_critical_issues()
         }
+    
+    def _get_critical_issues(self) -> List[Dict[str, str]]:
+        """Get list of critical issues based on analysis results"""
+        issues = []
+        
+        # Check for low confidence
+        if self.confidence_level and self.confidence_level < 0.3:
+            issues.append({
+                'issue': 'Low Analysis Confidence',
+                'description': f'Analysis confidence is only {self.confidence_level:.0%}',
+                'action_required': 'Consider collecting more ground truth data for validation'
+            })
+        
+        # Check for missing population data
+        if not self.population_estimate or self.population_estimate <= 0:
+            issues.append({
+                'issue': 'No Population Data',
+                'description': 'Population estimate is missing or zero',
+                'action_required': 'Verify zone boundaries and try re-analysis'
+            })
+        
+        # Check for missing building data
+        if not self.building_count or self.building_count <= 0:
+            issues.append({
+                'issue': 'No Building Data',
+                'description': 'Building count is missing or zero',
+                'action_required': 'Check satellite imagery coverage for this area'
+            })
+        
+        return issues
 
 
 class UnifiedAnalyzer:
@@ -165,32 +201,44 @@ class UnifiedAnalyzer:
     def _initialize_engines(self):
         """Initialize all analysis engines"""
         try:
-            # Population engine initialization
+            # Earth Engine initialization for building detection
             try:
-                from .population_engine import PopulationEngine
-                self.population_engine = PopulationEngine()
+                try:
+                    from .earth_engine_analysis import EarthEngineAnalyzer
+                except ImportError:
+                    # Try absolute import if relative fails
+                    from earth_engine_analysis import EarthEngineAnalyzer
+                    
+                self.earth_engine = EarthEngineAnalyzer()
+                logger.info("✅ Earth Engine analyzer initialized")
+            except ImportError as e:
+                logger.warning(f"⚠️ Earth Engine not available: {str(e)}")
+                self.earth_engine = None
+                self.initialization_errors.append("Earth Engine not available")
+            except Exception as e:
+                logger.warning(f"⚠️ Earth Engine initialization failed: {str(e)}")
+                self.earth_engine = None
+                self.initialization_errors.append(f"Earth Engine error: {str(e)}")
+            
+            # Population engine initialization (using existing population estimation)
+            try:
+                try:
+                    from .population_estimation import PopulationEstimator
+                except ImportError:
+                    from population_estimation import PopulationEstimator
+                    
+                self.population_engine = PopulationEstimator()
                 logger.info("✅ Population engine initialized")
             except ImportError:
                 logger.warning("⚠️ Population engine not available yet")
+                self.population_engine = None
                 self.initialization_errors.append("Population engine not implemented")
             
-            # Building engine initialization
-            try:
-                from .building_engine import BuildingEngine
-                self.building_engine = BuildingEngine()
-                logger.info("✅ Building engine initialized")
-            except ImportError:
-                logger.warning("⚠️ Building engine not available yet")
-                self.initialization_errors.append("Building engine not implemented")
+            # Building engine initialization (fallback to Earth Engine)
+            self.building_engine = None  # Will use Earth Engine directly
             
-            # Waste engine initialization
-            try:
-                from .waste_engine import WasteEngine
-                self.waste_engine = WasteEngine()
-                logger.info("✅ Waste engine initialized")
-            except ImportError:
-                logger.warning("⚠️ Waste engine not available yet")
-                self.initialization_errors.append("Waste engine not implemented")
+            # Waste engine initialization (using fallback calculation)
+            self.waste_engine = None  # Will use fallback calculation
             
             # Validation engine initialization
             try:
@@ -199,6 +247,7 @@ class UnifiedAnalyzer:
                 logger.info("✅ Validation engine initialized")
             except ImportError:
                 logger.warning("⚠️ Validation engine not available yet")
+                self.validation_engine = None
                 self.initialization_errors.append("Validation engine not implemented")
             
             self.initialized = True
@@ -239,6 +288,9 @@ class UnifiedAnalyzer:
             success=False
         )
         
+        # Track execution time
+        result._execution_time = 0
+        
         try:
             logger.info(f"🔍 Starting {request.analysis_type.value} analysis for {request_id}")
             
@@ -255,11 +307,14 @@ class UnifiedAnalyzer:
             # Mark as successful if we got here without exceptions
             result.success = True
             
+            # Store execution time
+            execution_time = time.time() - start_time
+            result._execution_time = execution_time
+            
             # Cache the result
             if self.cache_enabled:
                 self._cache_result(request_id, result)
             
-            execution_time = time.time() - start_time
             logger.info(f"✅ Analysis completed in {execution_time:.2f}s for {request_id}")
             
         except Exception as e:
@@ -270,221 +325,255 @@ class UnifiedAnalyzer:
         return result
     
     def _analyze_population(self, request: AnalysisRequest, result: AnalysisResult) -> AnalysisResult:
-        """Perform population analysis with timeout handling"""
-        if not self.population_engine:
+        """Perform population analysis using building-based estimation"""
+        if self.population_engine and result.building_count and result.building_count > 0:
+            try:
+                logger.info("Using building-based population estimation")
+                
+                # Create building DataFrame for population estimator
+                import pandas as pd
+                building_data = []
+                building_types = result.building_types or {'residential': result.building_count}
+                
+                for btype, count in building_types.items():
+                    for i in range(count):
+                        building_data.append({
+                            'id': f'{btype}_{i}',
+                            'area': self._get_typical_building_area(btype),
+                            'height': self._get_typical_building_height(btype),
+                            'building_type': btype,
+                            'settlement_type': result.settlement_classification or 'mixed'
+                        })
+                
+                building_df = pd.DataFrame(building_data)
+                
+                # Use ensemble estimation for best accuracy
+                pop_result = self.population_engine.estimate_population_ensemble(
+                    building_df,
+                    settlement_classifications=None,
+                    zone_area_sqm=self._estimate_zone_area(request.geometry)
+                )
+                
+                result.population_estimate = int(pop_result['total_population'])
+                result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
+                result.population_density = pop_result.get('individual_results', {}).get('settlement_based', {}).get('population_density_per_sqkm', 2500)
+                result.confidence_level = min(0.85, 0.6 + (result.building_count / 200) * 0.25)  # Higher confidence with more buildings
+                
+                if not result.data_sources:
+                    result.data_sources = []
+                result.data_sources.extend(['Building-based population estimation (ensemble method)'])
+                
+                logger.info(f"Building-based population estimate: {result.population_estimate} people from {result.building_count} buildings")
+                
+            except Exception as e:
+                logger.warning(f"Building-based population analysis failed: {str(e)}, using fallback")
+                result.population_estimate = self._fallback_population_estimate(request.geometry)
+                result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
+                result.population_density = 2500
+                result.confidence_level = 0.4
+                if not result.data_sources:
+                    result.data_sources = []
+                result.data_sources.extend(['Fallback estimation (building-based failed)'])
+                result.warnings = result.warnings or []
+                result.warnings.append(f"Building-based analysis failed: {str(e)}")
+        else:
             # Fallback to basic estimation
-            logger.warning("Population engine not available, using fallback estimation")
+            logger.warning("Population engine not available or no buildings detected, using fallback estimation")
             result.population_estimate = self._fallback_population_estimate(request.geometry)
             result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
             result.population_density = 2500  # Default density for Lusaka
             result.confidence_level = 0.3  # Low confidence for fallback
-            result.data_sources = ['Fallback estimation']
-            result.warnings = result.warnings or []
-            result.warnings.append("Using fallback population estimation")
-            return result
-        
-        try:
-            # Add a simple fallback mode for development
-            use_fallback = request.options.get('use_fallback', False)
-            
-            if use_fallback:
-                logger.info("Using fallback mode for population analysis")
-                result.population_estimate = self._fallback_population_estimate(request.geometry)
-                result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
-                result.population_density = 2500
-                result.confidence_level = 0.5
-                result.data_sources = ['Fallback estimation (requested)']
-                result.warnings = result.warnings or []
-                result.warnings.append("Using fallback mode for faster analysis")
-            else:
-                # Try normal analysis but with quick fallback on any error
-                try:
-                    pop_data = self.population_engine.estimate_population(
-                        request.geometry,
-                        options=request.options
-                    )
-                    
-                    result.population_estimate = pop_data.get('population_estimate')
-                    result.household_estimate = pop_data.get('household_estimate')
-                    result.population_density = pop_data.get('population_density')
-                    result.confidence_level = pop_data.get('confidence_level')
-                    result.data_sources = pop_data.get('data_sources', [])
-                    
-                except Exception as analysis_error:
-                    logger.warning(f"Population analysis failed, using fallback: {str(analysis_error)}")
-                    result.population_estimate = self._fallback_population_estimate(request.geometry)
-                    result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
-                    result.population_density = 2500
-                    result.confidence_level = 0.3
-                    result.data_sources = ['Fallback estimation (analysis failed)']
-                    result.warnings = result.warnings or []
-                    result.warnings.append(f"Population analysis failed: {str(analysis_error)}")
-                
-        except Exception as e:
-            logger.error(f"Population analysis completely failed: {str(e)}")
-            result.population_estimate = self._fallback_population_estimate(request.geometry)
-            result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
-            result.population_density = 5000
-            result.confidence_level = 0.2
-            result.data_sources = ['Fallback estimation (error)']
-            result.warnings = result.warnings or []
-            result.warnings.append(f"Population analysis completely failed: {str(e)}")
-        
-        return result
-    
-    def _analyze_buildings(self, request: AnalysisRequest, result: AnalysisResult) -> AnalysisResult:
-        """Perform building analysis with timeout handling"""
-        if not self.building_engine:
-            # Fallback to basic estimation
-            logger.warning("Building engine not available, using fallback estimation")
-            result.building_count = self._fallback_building_count(request.geometry)
-            result.building_types = {'residential': result.building_count}
-            result.settlement_classification = 'mixed'
-            result.confidence_level = 0.3
             if not result.data_sources:
                 result.data_sources = []
             result.data_sources.extend(['Fallback estimation'])
             result.warnings = result.warnings or []
-            result.warnings.append("Using fallback building estimation")
-            return result
-        
-        try:
-            # Add a simple fallback mode for development
-            use_fallback = request.options.get('use_fallback', False)
-            
-            if use_fallback:
-                logger.info("Using fallback mode for building analysis")
-                result.building_count = self._fallback_building_count(request.geometry)
-                result.building_types = {'residential': result.building_count}
-                result.settlement_classification = 'mixed'
-                result.confidence_level = 0.5
-                if not result.data_sources:
-                    result.data_sources = []
-                result.data_sources.extend(['Fallback estimation (requested)'])
-                result.warnings = result.warnings or []
-                result.warnings.append("Using fallback mode for faster analysis")
-            else:
-                # Try normal analysis but with quick fallback on any error
-                try:
-                    building_data = self.building_engine.analyze_buildings(
-                        request.geometry,
-                        options=request.options
-                    )
-                    
-                    result.building_count = building_data.get('building_count')
-                    result.building_types = building_data.get('building_types')
-                    result.settlement_classification = building_data.get('settlement_classification')
-                    result.confidence_level = building_data.get('confidence_level')
-                    
-                    if not result.data_sources:
-                        result.data_sources = []
-                    result.data_sources.extend(building_data.get('data_sources', []))
-                    
-                    # Estimate population based on building data
-                    if result.building_count and result.building_count > 0:
-                        population_estimate = self._estimate_population_from_buildings(
-                            building_data, result.settlement_classification
-                        )
-                        result.population_estimate = population_estimate
-                        result.household_estimate = int(population_estimate / 4.6) if population_estimate else 0
-                    
-                except Exception as analysis_error:
-                    logger.warning(f"Building analysis failed, using enhanced fallback: {str(analysis_error)}")
-                    
-                    # Enhanced fallback based on error type
-                    error_str = str(analysis_error).lower()
-                    
-                    if 'timeout' in error_str or 'rate limit' in error_str:
-                        # API timeout or rate limit - use enhanced area-based estimation
-                        result.building_count = self._enhanced_fallback_building_count(request.geometry)
-                        result.confidence_level = 0.4  # Higher confidence for enhanced fallback
-                        result.warnings = result.warnings or []
-                        result.warnings.append("Earth Engine API timeout - using enhanced area-based estimation")
-                    elif 'invalid geojson' in error_str or 'geometry' in error_str:
-                        # Geometry error - use basic fallback
-                        result.building_count = self._fallback_building_count(request.geometry)
-                        result.confidence_level = 0.2
-                        result.warnings = result.warnings or []
-                        result.warnings.append("Geometry error - using basic fallback estimation")
-                    else:
-                        # Other errors - use enhanced fallback
-                        result.building_count = self._enhanced_fallback_building_count(request.geometry)
-                        result.confidence_level = 0.3
-                        result.warnings = result.warnings or []
-                        result.warnings.append(f"Building analysis failed: {str(analysis_error)}")
-                    
-                    result.building_types = {'residential': result.building_count}
-                    result.settlement_classification = 'mixed'
-                    if not result.data_sources:
-                        result.data_sources = []
-                    result.data_sources.extend(['Enhanced fallback estimation'])
-                
-        except Exception as e:
-            logger.error(f"Building analysis completely failed: {str(e)}")
-            result.building_count = self._fallback_building_count(request.geometry)
-            result.building_types = {'residential': result.building_count}
-            result.settlement_classification = 'mixed'
-            result.confidence_level = 0.2
-            if not result.data_sources:
-                result.data_sources = []
-            result.data_sources.extend(['Fallback estimation (error)'])
-            result.warnings = result.warnings or []
-            result.warnings.append(f"Building analysis completely failed: {str(e)}")
+            result.warnings.append("Using fallback population estimation")
         
         return result
     
+    def _analyze_buildings(self, request: AnalysisRequest, result: AnalysisResult) -> AnalysisResult:
+        """Perform building analysis using Google Earth Engine with 83% confidence threshold"""
+        confidence_threshold = request.options.get('confidence_threshold', 0.83)
+        
+        if self.earth_engine and self.earth_engine.initialized:
+            try:
+                logger.info(f"Using Google Earth Engine for building detection (confidence >= {confidence_threshold*100:.0f}%)")
+                
+                # Create a temporary zone-like object for Earth Engine
+                from app.models import Zone
+                temp_zone = type('TempZone', (), {
+                    'id': request.zone_id or 'temp',
+                    'geojson': {
+                        'type': 'Feature',
+                        'geometry': request.geometry,
+                        'properties': {}
+                    }
+                })()
+                
+                # Extract buildings using Earth Engine
+                buildings_data = self.earth_engine.extract_buildings_for_zone(
+                    temp_zone, 
+                    confidence_threshold=confidence_threshold,
+                    use_cache=True
+                )
+                
+                if 'error' in buildings_data:
+                    raise Exception(buildings_data['error'])
+                
+                # Extract results
+                result.building_count = buildings_data.get('building_count', 0)
+                features = buildings_data.get('features', {})
+                height_stats = buildings_data.get('height_stats', {})
+                
+                # Classify building types based on features
+                result.building_types = self._classify_building_types(features, result.building_count)
+                
+                # Determine settlement classification from building characteristics
+                result.settlement_classification = self._classify_settlement_type(features, height_stats)
+                
+                # Set confidence level based on building count and features
+                result.confidence_level = min(0.9, 0.6 + (result.building_count / 100) * 0.3)
+                
+                if not result.data_sources:
+                    result.data_sources = []
+                result.data_sources.extend([f'Google Open Buildings v3 (confidence >= {confidence_threshold*100:.0f}%)'])
+                
+                logger.info(f"Earth Engine detected {result.building_count} buildings with {confidence_threshold*100:.0f}% confidence")
+                
+            except Exception as e:
+                logger.warning(f"Earth Engine building analysis failed: {str(e)}, using fallback")
+                return self._fallback_building_analysis(request, result, str(e))
+        else:
+            logger.warning("Earth Engine not available, using enhanced fallback")
+            return self._fallback_building_analysis(request, result, "Earth Engine not initialized")
+        
+        # Estimate population based on building data if we don't have one yet
+        if not result.population_estimate or result.population_estimate <= 0:
+            building_data = {
+                'building_count': result.building_count,
+                'building_types': result.building_types,
+                'average_building_size_sqm': self._estimate_avg_building_size(features if 'features' in locals() else {})
+            }
+            population_estimate = self._estimate_population_from_buildings(
+                building_data, result.settlement_classification
+            )
+            result.population_estimate = population_estimate
+            result.household_estimate = int(population_estimate / 4.6) if population_estimate else 0
+            
+        return result
+    
+    def _fallback_building_analysis(self, request: AnalysisRequest, result: AnalysisResult, error_msg: str) -> AnalysisResult:
+        """Fallback building analysis when Earth Engine is not available"""
+        result.building_count = self._enhanced_fallback_building_count(request.geometry)
+        result.building_types = {'residential': int(result.building_count * 0.7), 'commercial': int(result.building_count * 0.3)}
+        result.settlement_classification = 'mixed'
+        result.confidence_level = 0.3  # Lower confidence for fallback
+        if not result.data_sources:
+            result.data_sources = []
+        result.data_sources.extend(['Enhanced fallback estimation'])
+        result.warnings = result.warnings or []
+        result.warnings.append(f"Earth Engine unavailable ({error_msg}), using fallback estimation")
+        
+        # Estimate population based on building data if we don't have one yet
+        if not result.population_estimate or result.population_estimate <= 0:
+            building_data = {
+                'building_count': result.building_count,
+                'building_types': result.building_types,
+                'average_building_size_sqm': 100
+            }
+            population_estimate = self._estimate_population_from_buildings(
+                building_data, result.settlement_classification
+            )
+            result.population_estimate = population_estimate
+            result.household_estimate = int(population_estimate / 4.6) if population_estimate else 0
+            
+        return result
+    
+    def _classify_building_types(self, features: Dict, total_count: int) -> Dict[str, int]:
+        """Classify buildings into types based on features"""
+        if not features or total_count == 0:
+            return {'residential': total_count}
+        
+        # Default distribution for Lusaka based on features
+        # This would be enhanced with actual feature analysis
+        return {
+            'residential': int(total_count * 0.75),
+            'commercial': int(total_count * 0.15),
+            'mixed': int(total_count * 0.08),
+            'industrial': int(total_count * 0.02)
+        }
+    
+    def _classify_settlement_type(self, features: Dict, height_stats: Dict) -> str:
+        """Classify settlement type based on building characteristics"""
+        if not features and not height_stats:
+            return 'mixed'
+        
+        # Basic classification based on building density and height
+        # This would be enhanced with actual feature analysis
+        avg_height = height_stats.get('mean_height', 4.0) if height_stats else 4.0
+        
+        if avg_height > 8:
+            return 'formal_high_density'
+        elif avg_height > 5:
+            return 'formal_medium_density'
+        else:
+            return 'informal_medium_density'
+    
+    def _estimate_avg_building_size(self, features: Dict) -> float:
+        """Estimate average building size from features"""
+        if not features:
+            return 100.0  # Default
+        
+        # This would extract actual size data from features
+        return features.get('average_area', 100.0)
+    
     def _analyze_waste(self, request: AnalysisRequest, result: AnalysisResult) -> AnalysisResult:
         """Perform waste analysis with fallback handling"""
-        if not self.waste_engine:
-            logger.warning("Waste engine not available, using fallback calculation")
-            # Fallback waste calculation
-            population = result.population_estimate or 0
-            waste_rate = 0.5  # Lusaka standard rate
-            result.waste_generation_kg_per_day = population * waste_rate
-            result.collection_requirements = {
-                'frequency_per_week': 2,
-                'vehicle_requirements': {
-                    'truck_10_tonne': 1,
-                    'frequency_per_week': 2,
-                    'total_capacity_needed': result.waste_generation_kg_per_day * 7 / 2
-                }
-            }
-            return result
+        # Always use fallback calculation since waste engine is not implemented yet
+        logger.info("Using fallback waste calculation")
         
         # Need population data for waste calculation
         population_for_waste = result.population_estimate
-        if not population_for_waste:
+        if not population_for_waste or population_for_waste <= 0:
             # Get population estimate first using fallback
             population_for_waste = self._fallback_population_estimate(request.geometry)
             if not result.population_estimate:  # Only update if we don't have one
                 result.population_estimate = population_for_waste
         
-        try:
-            # Get waste calculations
-            waste_data = self.waste_engine.calculate_waste_generation(
-                population=population_for_waste,
-                zone_type=request.zone_type,
-                options=request.options
-            )
-            
-            result.waste_generation_kg_per_day = waste_data.get('waste_generation_kg_per_day')
-            result.collection_requirements = waste_data.get('collection_requirements')
-            
-        except Exception as e:
-            logger.warning(f"Waste analysis failed, using fallback: {str(e)}")
-            # Fallback waste calculation
-            waste_rate = 0.5  # Lusaka standard rate
-            result.waste_generation_kg_per_day = population_for_waste * waste_rate
-            result.collection_requirements = {
-                'frequency_per_week': 2,
-                'vehicle_requirements': {
-                    'truck_10_tonne': 1,
-                    'frequency_per_week': 2,
-                    'total_capacity_needed': result.waste_generation_kg_per_day * 7 / 2
-                }
-            }
+        # Ensure we have a valid population
+        if population_for_waste <= 0:
+            population_for_waste = 1000  # Default minimum population
             result.warnings = result.warnings or []
-            result.warnings.append(f"Waste analysis failed: {str(e)}")
+            result.warnings.append("No population data available, using default estimate")
+        
+        # Fallback waste calculation using Lusaka standards
+        waste_rate = request.options.get('waste_rate_kg_per_person', 0.5)  # Lusaka standard rate
+        result.waste_generation_kg_per_day = float(population_for_waste * waste_rate)
+        
+        # Calculate collection requirements
+        weekly_waste = result.waste_generation_kg_per_day * 7
+        collection_frequency = request.options.get('collection_frequency', 2)  # times per week
+        waste_per_collection = weekly_waste / collection_frequency
+        
+        # Assume 10-tonne trucks
+        truck_capacity_kg = 10000
+        trucks_needed = max(1, int(waste_per_collection / truck_capacity_kg) + (1 if waste_per_collection % truck_capacity_kg > 0 else 0))
+        
+        result.collection_requirements = {
+            'frequency_per_week': collection_frequency,
+            'vehicle_requirements': {
+                'truck_10_tonne': trucks_needed,
+                'frequency_per_week': collection_frequency,
+                'total_capacity_needed': waste_per_collection
+            },
+            'collection_points': max(1, int(population_for_waste / 500)),  # 1 point per 500 people
+            'vehicles_required': trucks_needed,
+            'monthly_revenue': population_for_waste * 50,  # Estimated K50 per person per month
+            'daily_cost': trucks_needed * 500,  # K500 per truck per day
+            'monthly_cost': trucks_needed * 500 * 30
+        }
+        
+        logger.info(f"Waste calculation: {population_for_waste} people × {waste_rate} kg/day = {result.waste_generation_kg_per_day} kg/day")
         
         return result
     
@@ -729,6 +818,48 @@ class UnifiedAnalyzer:
         except Exception as e:
             logger.error(f"Fallback building estimation failed: {str(e)}")
             return 50  # Default fallback
+    
+    def _get_typical_building_area(self, building_type: str) -> float:
+        """Get typical building area by type for Lusaka"""
+        typical_areas = {
+            'residential': 85.0,
+            'commercial': 150.0,
+            'mixed': 110.0,
+            'industrial': 200.0,
+            'unknown': 100.0
+        }
+        return typical_areas.get(building_type, 100.0)
+    
+    def _get_typical_building_height(self, building_type: str) -> float:
+        """Get typical building height by type for Lusaka"""
+        typical_heights = {
+            'residential': 3.5,
+            'commercial': 4.5,
+            'mixed': 4.0,
+            'industrial': 6.0,
+            'unknown': 3.5
+        }
+        return typical_heights.get(building_type, 3.5)
+    
+    def _estimate_zone_area(self, geometry: Dict[str, Any]) -> float:
+        """Estimate zone area in square meters"""
+        try:
+            from shapely.geometry import shape
+            
+            # Handle both GeoJSON Feature and plain geometry
+            if geometry.get('type') == 'Feature':
+                geom_data = geometry.get('geometry', {})
+            else:
+                geom_data = geometry
+            
+            # Convert geometry to shape and calculate area
+            geom = shape(geom_data)
+            area_sqm = geom.area * 111320 ** 2  # Convert degrees to square meters
+            return area_sqm
+            
+        except Exception as e:
+            logger.error(f"Zone area estimation failed: {str(e)}")
+            return 1000000  # Default 1 km²
 
 
 # Global analyzer instance
