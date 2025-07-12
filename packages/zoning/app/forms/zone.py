@@ -54,6 +54,31 @@ class ZoneForm(FlaskForm):
         NumberRange(min=1, max=7)
     ], default=2)
     
+    # Area configuration fields
+    settlement_density = SelectField('Settlement Density', choices=[
+        ('high_density', 'High Density (>100 people/hectare)'),
+        ('medium_density', 'Medium Density (50-100 people/hectare)'),
+        ('low_density', 'Low Density (<50 people/hectare)'),
+        ('informal_settlement', 'Informal Settlement')
+    ], validators=[DataRequired()], default='medium_density')
+    
+    average_household_charge = FloatField('Average Household Charge (K/month)', validators=[
+        DataRequired(),
+        NumberRange(min=0, max=2000)
+    ], default=150, description='Average amount charged per household per month')
+    
+    waste_generation_rate = FloatField('Waste Generation Rate (kg/person/day)', validators=[
+        Optional(),
+        NumberRange(min=0.1, max=5.0)
+    ], default=0.5, description='Leave blank to use default rates by area type')
+    
+    socioeconomic_level = SelectField('Socioeconomic Level', choices=[
+        ('low_income', 'Low Income (K500-2000/month)'),
+        ('middle_income', 'Middle Income (K2000-8000/month)'),
+        ('high_income', 'High Income (K8000+/month)'),
+        ('mixed_income', 'Mixed Income')
+    ], validators=[DataRequired()], default='mixed_income')
+    
     # Hidden field for geometry
     geometry = HiddenField('Geometry')
     

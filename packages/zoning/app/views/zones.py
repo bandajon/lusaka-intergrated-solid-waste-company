@@ -105,6 +105,10 @@ def create():
             household_count=form.household_count.data,
             business_count=form.business_count.data,
             collection_frequency_week=form.collection_frequency_week.data,
+            settlement_density=form.settlement_density.data,
+            average_household_charge=form.average_household_charge.data,
+            waste_generation_rate=form.waste_generation_rate.data,
+            socioeconomic_level=form.socioeconomic_level.data,
             created_by=current_user.id,
             import_source='manual'
         )
@@ -689,14 +693,21 @@ def analyze_zone():
             analysis_type=AnalysisType.COMPREHENSIVE,
             geometry=clean_geometry,  # Use validated geometry
             zone_name=zone_metadata.get('name', 'Drawn Zone'),
-            zone_type=zone_metadata.get('zone_type'),
+            zone_type=zone_metadata.get('zone_type', 'mixed_use'),
             options={
                 'include_population': True,
                 'include_buildings': True,
                 'include_waste': True,
                 'include_validation': True,
                 # Use default confidence threshold from unified analyzer (85%)
-                'use_fallback': zone_metadata.get('use_fallback', False)  # Disable fallback by default
+                'use_fallback': zone_metadata.get('use_fallback', False),  # Disable fallback by default
+                
+                # Area configuration for enhanced analysis
+                'zone_type': zone_metadata.get('zone_type', 'mixed_use'),
+                'settlement_density': zone_metadata.get('settlement_density', 'medium_density'),
+                'socioeconomic_level': zone_metadata.get('socioeconomic_level', 'mixed_income'),
+                'average_household_charge': zone_metadata.get('average_household_charge', 150.0),
+                'waste_generation_rate': zone_metadata.get('waste_generation_rate')  # Custom rate if provided
             }
         )
         

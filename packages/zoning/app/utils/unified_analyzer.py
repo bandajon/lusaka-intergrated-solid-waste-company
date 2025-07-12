@@ -105,6 +105,7 @@ class AnalysisResult:
     settlement_classification: Optional[str] = None
     collection_requirements: Optional[Dict[str, Any]] = None
     revenue_projections: Optional[Dict[str, Any]] = None
+    area_configuration: Optional[Dict[str, Any]] = None
     
     # Quality metrics
     confidence_level: Optional[float] = None
@@ -131,6 +132,8 @@ class AnalysisResult:
             'settlement_classification': self.settlement_classification,
             'collection_requirements': self.collection_requirements,
             'revenue_projections': self.revenue_projections,
+            'area_configuration': self.area_configuration,
+            'area_config': getattr(self, 'area_config', {}),  # Add area_config for frontend compatibility
             'confidence_level': self.confidence_level,
             'data_sources': self.data_sources,
             'validation_metrics': self.validation_metrics,
@@ -307,6 +310,15 @@ class UnifiedAnalyzer:
             timestamp=datetime.now(),
             success=False
         )
+        
+        # Add area configuration to result for revenue calculations
+        result.area_config = {
+            'zone_type': request.options.get('zone_type', 'mixed_use'),
+            'settlement_density': request.options.get('settlement_density', 'medium_density'),
+            'socioeconomic_level': request.options.get('socioeconomic_level', 'mixed_income'),
+            'average_household_charge': request.options.get('average_household_charge', 150.0),
+            'waste_generation_rate': request.options.get('waste_generation_rate')
+        }
         
         # Track execution time
         result._execution_time = 0
@@ -565,9 +577,52 @@ class UnifiedAnalyzer:
             result.warnings = result.warnings or []
             result.warnings.append("No population data available, using default estimate")
         
-        # Fallback waste calculation using Lusaka standards
-        waste_rate = request.options.get('waste_rate_kg_per_person', 0.5)  # Lusaka standard rate
+        # Use area-specific waste calculation
+        from app.analytics.config import AnalyticsConfig
+        
+        # Get area configuration from request options
+        zone_type = request.options.get('zone_type', 'mixed_use')
+        settlement_density = request.options.get('settlement_density', 'medium_density')
+        socioeconomic_level = request.options.get('socioeconomic_level', 'mixed_income')
+        custom_waste_rate = request.options.get('waste_generation_rate')
+        
+        # Calculate area-specific waste generation rate
+        waste_rate = AnalyticsConfig.get_waste_generation_rate(
+            zone_type=zone_type,
+            settlement_density=settlement_density,
+            socioeconomic_level=socioeconomic_level,
+            custom_rate=custom_waste_rate
+        )
+        
         result.waste_generation_kg_per_day = float(population_for_waste * waste_rate)
+        
+        # Store area configuration in result for reference
+        result.area_configuration = {
+            'zone_type': zone_type,
+            'settlement_density': settlement_density,
+            'socioeconomic_level': socioeconomic_level,
+            'waste_generation_rate': waste_rate,
+            'custom_rate_used': custom_waste_rate is not None,
+            'average_household_charge': request.options.get('average_household_charge', 150.0)
+        }
+        
+        # Calculate revenue projections based on area configuration
+        household_count = result.household_estimate or (population_for_waste / 4.6)  # Lusaka average household size
+        average_household_charge = request.options.get('average_household_charge', 150.0)
+        
+        revenue_projection = AnalyticsConfig.calculate_expected_revenue(
+            household_count=int(household_count),
+            average_household_charge=average_household_charge,
+            socioeconomic_level=socioeconomic_level
+        )
+        
+        result.revenue_projections = {
+            'household_count': int(household_count),
+            'average_household_charge': average_household_charge,
+            **revenue_projection,
+            'area_adjusted': True,
+            'calculation_method': 'area_specific_payment_capacity'
+        }
         
         # Calculate collection requirements
         weekly_waste = result.waste_generation_kg_per_day * 7
@@ -581,12 +636,21 @@ class UnifiedAnalyzer:
                 distance_km = self._calculate_distance(zone_center['lat'], zone_center['lng'], chunga_lat, chunga_lng)
                 settlement_type = result.settlement_classification or 'mixed'
                 
-                # Get AI-powered recommendation
+                # Get AI-powered recommendation with area configuration
+                area_config = {
+                    'zone_type': zone_type,
+                    'settlement_density': settlement_density,
+                    'socioeconomic_level': socioeconomic_level,
+                    'average_household_charge': request.options.get('average_household_charge', 150.0),
+                    'waste_generation_rate': custom_waste_rate
+                }
+                
                 gemini_rec = get_gemini_recommendation(
                     population=int(result.population_estimate),
                     daily_waste_kg=float(result.waste_generation_kg_per_day),
                     distance_km=distance_km,
-                    settlement_type=settlement_type
+                    settlement_type=settlement_type,
+                    area_config=area_config
                 )
                 
                 if gemini_rec:
@@ -1275,66 +1339,73 @@ class UnifiedAnalyzer:
         return liters_needed * 25
     
     def _calculate_projected_revenue(self, result: AnalysisResult) -> Dict[str, Any]:
-        """Calculate projected revenue based on building count and settlement type"""
+        """Calculate projected revenue based on building count and area configuration"""
         try:
+            from app.analytics.config import AnalyticsConfig
+            
             building_count = result.building_count or 0
-            settlement_type = result.settlement_classification or 'mixed'
+            household_count = result.household_estimate or building_count
             
-            # Determine rate per building based on settlement type and characteristics
-            if settlement_type in ['formal_medium_density', 'formal_high_density']:
-                # Urban less dense neighborhoods - K150 per house
-                rate_per_building = 150
-                settlement_description = "Urban/Formal Settlement"
-                density_category = "low_density"
-            elif settlement_type in ['informal_high_density', 'informal_medium_density']:
-                # Densely populated areas with smaller houses - K30 per house
-                rate_per_building = 30
-                settlement_description = "Dense/Informal Settlement"
-                density_category = "high_density"
-            else:
-                # Mixed settlement - use average rate
-                rate_per_building = 90  # Average between K150 and K30
-                settlement_description = "Mixed Settlement"
-                density_category = "mixed_density"
+            # Get area configuration from request options
+            area_config = getattr(result, 'area_config', {}) or {}
+            settlement_density = area_config.get('settlement_density', 'medium_density')
+            socioeconomic_level = area_config.get('socioeconomic_level', 'mixed_income')
+            average_household_charge = area_config.get('average_household_charge', 150.0)
             
-            # Calculate revenue projections
-            monthly_revenue_kwacha = building_count * rate_per_building
+            # Use the user's configured household charge as the rate per building
+            rate_per_building = average_household_charge
+            
+            # Get settlement description based on area configuration
+            density_descriptions = {
+                'high_density': 'High Density (>100 people/hectare)',
+                'medium_density': 'Medium Density (50-100 people/hectare)', 
+                'low_density': 'Low Density (<50 people/hectare)',
+                'informal_settlement': 'Informal Settlement'
+            }
+            
+            income_descriptions = {
+                'low_income': 'Low Income Area',
+                'middle_income': 'Middle Income Area', 
+                'high_income': 'High Income Area',
+                'mixed_income': 'Mixed Income Area'
+            }
+            
+            settlement_description = f"{density_descriptions.get(settlement_density, settlement_density)} - {income_descriptions.get(socioeconomic_level, socioeconomic_level)}"
+            
+            # Calculate revenue projections using user's household charge
+            monthly_revenue_kwacha = household_count * rate_per_building
             annual_revenue_kwacha = monthly_revenue_kwacha * 12
             
             # Convert to USD for consistency with other calculations
             monthly_revenue_usd = monthly_revenue_kwacha / 27
             annual_revenue_usd = annual_revenue_kwacha / 27
             
-            # Calculate collection efficiency assumptions
-            # Assume 85% collection rate in formal areas, 70% in informal areas
-            if density_category == "low_density":
-                collection_efficiency = 0.85
-            elif density_category == "high_density":
-                collection_efficiency = 0.70
-            else:
-                collection_efficiency = 0.75
+            # Calculate collection efficiency based on area configuration
+            payment_capacity = AnalyticsConfig.get_payment_capacity_rate(socioeconomic_level)
+            collection_efficiency = payment_capacity
             
-            # Realistic revenue (accounting for collection efficiency)
+            # Realistic revenue (accounting for payment capacity/collection efficiency)
             realistic_monthly_kwacha = monthly_revenue_kwacha * collection_efficiency
             realistic_annual_kwacha = annual_revenue_kwacha * collection_efficiency
             realistic_monthly_usd = monthly_revenue_usd * collection_efficiency
             realistic_annual_usd = annual_revenue_usd * collection_efficiency
             
-            # Revenue potential score (based on building count and settlement type)
-            if building_count > 300 and rate_per_building >= 90:
+            # Revenue potential score (based on household count, rate, and payment capacity)
+            if household_count > 300 and rate_per_building >= 100 and collection_efficiency >= 0.8:
                 revenue_potential = "high"
-            elif building_count > 150 and rate_per_building >= 60:
+            elif household_count > 150 and rate_per_building >= 75 and collection_efficiency >= 0.6:
                 revenue_potential = "medium"
             else:
                 revenue_potential = "low"
             
-            logger.info(f"Revenue projection: {building_count} buildings × K{rate_per_building} = K{monthly_revenue_kwacha:,.0f}/month")
+            logger.info(f"Revenue projection: {household_count} households × K{rate_per_building} × {collection_efficiency:.0%} = K{realistic_monthly_kwacha:,.0f}/month")
             
             return {
                 'total_buildings': building_count,
-                'settlement_type': settlement_type,
+                'total_households': household_count,
+                'settlement_type': result.settlement_classification or 'mixed',
                 'settlement_description': settlement_description,
-                'density_category': density_category,
+                'density_category': settlement_density,
                 'rate_per_building_kwacha': rate_per_building,
                 'rate_per_building_usd': rate_per_building / 27,
                 'projected_monthly_revenue_kwacha': monthly_revenue_kwacha,
@@ -1347,8 +1418,10 @@ class UnifiedAnalyzer:
                 'realistic_monthly_revenue_usd': realistic_monthly_usd,
                 'realistic_annual_revenue_usd': realistic_annual_usd,
                 'revenue_potential': revenue_potential,
+                'payment_capacity_rate': collection_efficiency,
+                'area_configuration': area_config,
                 'success': True,
-                'data_source': 'building_analysis'
+                'data_source': 'area_configuration'
             }
             
         except Exception as e:

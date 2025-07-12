@@ -50,7 +50,8 @@ class GeminiRecommendationEngine:
                                     population: int,
                                     daily_waste_kg: float,
                                     distance_to_dump_km: float,
-                                    settlement_type: str = "mixed") -> TruckRecommendation:
+                                    settlement_type: str = "mixed",
+                                    area_config: dict = None) -> TruckRecommendation:
         """
         Generate intelligent truck fleet recommendations using Gemini Flash
         """
@@ -61,7 +62,7 @@ class GeminiRecommendationEngine:
             # Prepare comprehensive context for Gemini
             context = self._build_analysis_context(
                 population, daily_waste_kg, weekly_waste_kg, 
-                distance_to_dump_km, settlement_type
+                distance_to_dump_km, settlement_type, area_config
             )
             
             # Generate recommendation using Gemini
@@ -84,7 +85,7 @@ class GeminiRecommendationEngine:
     
     def _build_analysis_context(self, population: int, daily_waste_kg: float, 
                                weekly_waste_kg: float, distance_km: float, 
-                               settlement_type: str) -> str:
+                               settlement_type: str, area_config: dict = None) -> str:
         """Build comprehensive context for Gemini analysis"""
         
         # Calculate example costs for guidance
@@ -94,6 +95,45 @@ class GeminiRecommendationEngine:
         # Chunga dumpsite charges full tonnes only (3.1 tonnes = 4 tonnes billing)
         billable_tonnes = math.ceil(weekly_waste_tonnes)
         franchise_cost_per_week = billable_tonnes * 50  # K50/tonne
+        
+        # Extract area configuration details
+        area_info = ""
+        if area_config:
+            zone_type = area_config.get('zone_type', 'mixed_use')
+            settlement_density = area_config.get('settlement_density', 'medium_density')
+            socioeconomic_level = area_config.get('socioeconomic_level', 'mixed_income')
+            household_charge = area_config.get('average_household_charge', 150)
+            custom_waste_rate = area_config.get('waste_generation_rate')
+            
+            density_descriptions = {
+                'high_density': 'High Density (>100 people/hectare) - Dense urban settlement',
+                'medium_density': 'Medium Density (50-100 people/hectare) - Standard urban area',
+                'low_density': 'Low Density (<50 people/hectare) - Suburban area',
+                'informal_settlement': 'Informal Settlement - Limited infrastructure'
+            }
+            
+            income_descriptions = {
+                'low_income': 'Low Income (K500-2000/month) - Limited disposal budget',
+                'middle_income': 'Middle Income (K2000-8000/month) - Standard payment capacity',
+                'high_income': 'High Income (K8000+/month) - Higher consumption patterns',
+                'mixed_income': 'Mixed Income - Varied economic levels'
+            }
+            
+            area_info = f"""
+📍 AREA CHARACTERISTICS:
+- Zone Type: {zone_type.replace('_', ' ').title()}
+- Settlement Density: {density_descriptions.get(settlement_density, settlement_density)}
+- Economic Profile: {income_descriptions.get(socioeconomic_level, socioeconomic_level)}
+- Average Household Charge: K{household_charge}/month
+- {'Custom waste rate: ' + str(custom_waste_rate) + ' kg/person/day' if custom_waste_rate else 'Using standard waste generation rates'}
+
+💡 AREA-SPECIFIC CONSIDERATIONS:
+- Economic level affects payment capacity and waste generation patterns
+- Settlement density influences collection logistics and truck accessibility  
+- Zone type determines primary waste composition (residential vs commercial vs mixed)
+- Household charges indicate affordability constraints for service costs
+
+"""
         
         context = f"""
 You are an expert waste management consultant for Lusaka, Zambia. Your goal is to recommend the MOST EFFICIENT and COST-EFFECTIVE truck fleet that can handle all waste with minimal over-capacity.
@@ -105,6 +145,8 @@ SCENARIO ANALYSIS:
 - Weekly waste generation: {weekly_waste_kg:,.1f} kg ({weekly_waste_kg/1000:.1f} tonnes)
 - Distance to Chunga dump site: {distance_km:.1f} km (round trip: {round_trip_km:.1f} km)
 - Settlement type: {settlement_type}
+
+{area_info}
 
 💰 COST CALCULATION REQUIREMENTS:
 - Fuel cost per trip: K{fuel_cost_per_trip:.0f} ({round_trip_km:.1f}km @ K23/liter, 6km/liter efficiency)
@@ -299,7 +341,8 @@ def initialize_gemini_engine(api_key: str = "AIzaSyCS1D1Fayd8ekwQE8NwberHPU-Xkaq
         return None
 
 def get_gemini_recommendation(population: int, daily_waste_kg: float, 
-                            distance_km: float, settlement_type: str = "mixed") -> Optional[TruckRecommendation]:
+                            distance_km: float, settlement_type: str = "mixed",
+                            area_config: dict = None) -> Optional[TruckRecommendation]:
     """Get truck recommendation using Gemini AI"""
     if not gemini_engine:
         logger.warning("⚠️ Gemini engine not initialized, using fallback")
@@ -307,7 +350,7 @@ def get_gemini_recommendation(population: int, daily_waste_kg: float,
     
     try:
         return gemini_engine.generate_truck_recommendation(
-            population, daily_waste_kg, distance_km, settlement_type
+            population, daily_waste_kg, distance_km, settlement_type, area_config
         )
     except Exception as e:
         logger.error(f"❌ Gemini recommendation failed: {str(e)}")
