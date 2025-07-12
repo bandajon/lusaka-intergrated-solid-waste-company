@@ -889,9 +889,25 @@ class ZoneAnalyzer {
                 </div>
             ` : ''}
             
-            ${result.revenue_projections && result.revenue_projections.success ? `
+${result.revenue_projections && result.revenue_projections.success ? `
                 <div class="revenue-projections">
                     <h4>💰 Revenue Projections</h4>
+                    
+                    ${result.area_config ? `
+                        <div class="area-config-display mb-3" style="background: #f8f9fa; border-radius: 6px; padding: 12px;">
+                            <h6 style="margin: 0 0 8px 0; color: #495057;">
+                                <i class="fas fa-map-marker-alt"></i> Area Configuration
+                            </h6>
+                            <div class="config-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                                <div><strong>Zone Type:</strong> ${(result.area_config.zone_type || 'mixed_use').replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</div>
+                                <div><strong>Settlement Density:</strong> ${(result.area_config.settlement_density || 'medium_density').replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</div>
+                                <div><strong>Economic Level:</strong> ${(result.area_config.socioeconomic_level || 'mixed_income').replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</div>
+                                <div><strong>Household Rate:</strong> K${result.area_config.average_household_charge || 150}/month</div>
+                                ${result.area_config.waste_generation_rate ? `<div style="grid-column: span 2;"><strong>Custom Waste Rate:</strong> ${result.area_config.waste_generation_rate} kg/person/day</div>` : ''}
+                            </div>
+                        </div>
+                    ` : ''}
+                    
                     <div class="revenue-overview">
                         <div class="revenue-metric">
                             <div class="revenue-value">K${result.revenue_projections.realistic_monthly_revenue_kwacha.toLocaleString()}</div>
@@ -1000,11 +1016,54 @@ class ZoneAnalyzer {
     
     getZoneMetadata() {
         // Get additional metadata from form or UI if available
-        return {
-            zone_type: 'residential', // Default, could be from UI
+        const metadata = {
+            zone_type: 'mixed_use', // Default
             estimated_population: null,
             collection_frequency: 2
         };
+        
+        // Try to get values from form fields if they exist
+        try {
+            const zoneTypeEl = document.getElementById('zone_type');
+            if (zoneTypeEl && zoneTypeEl.value) {
+                metadata.zone_type = zoneTypeEl.value.toLowerCase();
+            }
+            
+            const settlementDensityEl = document.getElementById('settlement_density');
+            if (settlementDensityEl && settlementDensityEl.value) {
+                metadata.settlement_density = settlementDensityEl.value;
+            }
+            
+            const socioeconomicLevelEl = document.getElementById('socioeconomic_level');
+            if (socioeconomicLevelEl && socioeconomicLevelEl.value) {
+                metadata.socioeconomic_level = socioeconomicLevelEl.value;
+            }
+            
+            const householdChargeEl = document.getElementById('average_household_charge');
+            if (householdChargeEl && householdChargeEl.value) {
+                metadata.average_household_charge = parseFloat(householdChargeEl.value);
+            }
+            
+            const wasteRateEl = document.getElementById('waste_generation_rate');
+            if (wasteRateEl && wasteRateEl.value) {
+                metadata.waste_generation_rate = parseFloat(wasteRateEl.value);
+            }
+            
+            const populationEl = document.getElementById('estimated_population');
+            if (populationEl && populationEl.value) {
+                metadata.estimated_population = parseInt(populationEl.value);
+            }
+            
+            const frequencyEl = document.getElementById('collection_frequency_week');
+            if (frequencyEl && frequencyEl.value) {
+                metadata.collection_frequency = parseInt(frequencyEl.value);
+            }
+            
+        } catch (e) {
+            console.warn('Could not read form metadata:', e);
+        }
+        
+        return metadata;
     }
     
     // Action methods

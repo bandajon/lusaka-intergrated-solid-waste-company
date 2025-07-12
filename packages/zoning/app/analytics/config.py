@@ -20,21 +20,54 @@ class AnalyticsConfig:
         'mixed': 0.75           # 75% payment rate for mixed zones
     }
     
-    # Waste Generation Rates (kg per person/unit per day) 
+    # Waste Generation Rates by Area Type and Settlement Density (kg per person per day)
     WASTE_GENERATION_RATES = {
         'residential': {
-            'per_person': 0.5,      # kg/person/day
-            'per_household': 2.5    # kg/household/day (avg 5 people)
+            'high_density': 0.4,       # kg/person/day - High density areas, less consumption space
+            'medium_density': 0.5,      # kg/person/day - Standard Lusaka rate  
+            'low_density': 0.6,        # kg/person/day - Low density, more consumption
+            'informal_settlement': 0.3  # kg/person/day - Lower consumption due to income
         },
         'commercial': {
-            'small_business': 10,   # kg/day
-            'medium_business': 50,  # kg/day
-            'large_business': 200   # kg/day
+            'high_density': 2.5,       # kg/employee/day - Dense commercial areas
+            'medium_density': 2.0,      # kg/employee/day - Standard commercial
+            'low_density': 1.5,        # kg/employee/day - Suburban commercial
+            'informal_settlement': 1.0  # kg/employee/day - Small informal businesses
         },
         'industrial': {
-            'light_industry': 500,  # kg/day
-            'heavy_industry': 2000  # kg/day
+            'high_density': 8.0,       # kg/employee/day - Heavy industrial
+            'medium_density': 6.0,      # kg/employee/day - Standard industrial
+            'low_density': 4.0,        # kg/employee/day - Light industrial
+            'informal_settlement': 2.0  # kg/employee/day - Informal manufacturing
+        },
+        'mixed_use': {
+            'high_density': 0.7,       # kg/person/day - Mix of residential/commercial
+            'medium_density': 0.6,      # kg/person/day - Balanced mixed use
+            'low_density': 0.5,        # kg/person/day - Suburban mixed use
+            'informal_settlement': 0.4  # kg/person/day - Informal mixed areas
+        },
+        'institutional': {
+            'high_density': 1.5,       # kg/person/day - Schools, hospitals
+            'medium_density': 1.2,      # kg/person/day - Government offices
+            'low_density': 1.0,        # kg/person/day - Small institutions
+            'informal_settlement': 0.8  # kg/person/day - Basic services
         }
+    }
+    
+    # Socioeconomic Level Multipliers for Waste Generation
+    SOCIOECONOMIC_MULTIPLIERS = {
+        'low_income': 0.7,      # 30% less waste generation
+        'middle_income': 1.0,   # Base rate
+        'high_income': 1.4,     # 40% more waste generation  
+        'mixed_income': 1.0     # Average rate
+    }
+    
+    # Payment Capacity by Socioeconomic Level (percentage likely to pay full amount)
+    PAYMENT_CAPACITY_RATES = {
+        'low_income': 0.50,     # 50% payment capacity
+        'middle_income': 0.75,  # 75% payment capacity
+        'high_income': 0.95,    # 95% payment capacity
+        'mixed_income': 0.70    # 70% average payment capacity
     }
     
     # Collection Parameters
@@ -116,6 +149,46 @@ class AnalyticsConfig:
             return "2x_per_week"
         else:
             return "weekly"
+    
+    @classmethod
+    def get_waste_generation_rate(cls, zone_type: str, settlement_density: str, 
+                                 socioeconomic_level: str, custom_rate: Optional[float] = None) -> float:
+        """Get area-specific waste generation rate"""
+        # If custom rate is provided, use it with socioeconomic multiplier
+        if custom_rate is not None:
+            base_rate = custom_rate
+        else:
+            # Get base rate from zone type and density
+            zone_rates = cls.WASTE_GENERATION_RATES.get(zone_type.lower(), cls.WASTE_GENERATION_RATES['mixed_use'])
+            base_rate = zone_rates.get(settlement_density, zone_rates['medium_density'])
+        
+        # Apply socioeconomic multiplier
+        multiplier = cls.SOCIOECONOMIC_MULTIPLIERS.get(socioeconomic_level, 1.0)
+        return base_rate * multiplier
+    
+    @classmethod
+    def get_payment_capacity_rate(cls, socioeconomic_level: str) -> float:
+        """Get payment capacity rate for socioeconomic level"""
+        return cls.PAYMENT_CAPACITY_RATES.get(socioeconomic_level, cls.PAYMENT_CAPACITY_RATES['mixed_income'])
+    
+    @classmethod
+    def calculate_expected_revenue(cls, household_count: int, average_household_charge: float, 
+                                 socioeconomic_level: str) -> Dict[str, float]:
+        """Calculate expected revenue considering payment capacity"""
+        payment_capacity = cls.get_payment_capacity_rate(socioeconomic_level)
+        
+        # Calculate revenue projections
+        gross_monthly_revenue = household_count * average_household_charge
+        expected_monthly_revenue = gross_monthly_revenue * payment_capacity
+        revenue_shortfall = gross_monthly_revenue - expected_monthly_revenue
+        
+        return {
+            'gross_monthly_revenue': gross_monthly_revenue,
+            'expected_monthly_revenue': expected_monthly_revenue,
+            'payment_capacity_rate': payment_capacity,
+            'revenue_shortfall': revenue_shortfall,
+            'collection_efficiency': payment_capacity * 100  # As percentage
+        }
     
     @classmethod
     def get_truck_recommendation(cls, waste_per_collection: float) -> Dict[str, Any]:

@@ -54,6 +54,12 @@ class Zone(db.Model):
     waste_generation_kg_day = db.Column(db.Float)
     collection_frequency_week = db.Column(db.Integer, default=2)
     
+    # Area configuration attributes
+    settlement_density = db.Column(db.String(50), default='medium_density')
+    average_household_charge = db.Column(db.Float, default=150.0)
+    waste_generation_rate = db.Column(db.Float, default=0.5)
+    socioeconomic_level = db.Column(db.String(50), default='mixed_income')
+    
     # Metadata
     created_by = db.Column(db.Integer, db.ForeignKey('zoning_users.id'), nullable=False)
     modified_by = db.Column(db.Integer, db.ForeignKey('zoning_users.id'))
