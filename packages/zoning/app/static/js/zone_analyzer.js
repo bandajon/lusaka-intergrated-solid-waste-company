@@ -207,17 +207,169 @@ class ZoneAnalyzer {
                 border-left-color: #721c24;
             }
             
-            .critical-issues {
+            .revenue-projections {
+                margin-bottom: 20px;
+                background: #d4edda;
+                border: 1px solid #c3e6cb;
+                border-radius: 6px;
+                padding: 15px;
+            }
+            
+            .revenue-overview {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+                margin-bottom: 15px;
+            }
+            
+            .revenue-metric {
+                text-align: center;
+                padding: 10px;
+                background: white;
+                border-radius: 4px;
+                border: 1px solid #28a745;
+            }
+            
+            .revenue-value {
+                font-size: 24px;
+                font-weight: bold;
+                color: #28a745;
+                margin-bottom: 5px;
+            }
+            
+            .revenue-label {
+                font-size: 12px;
+                color: #6c757d;
+                text-transform: uppercase;
+                font-weight: 500;
+            }
+            
+            .revenue-details {
+                border-top: 1px solid #c3e6cb;
+                padding-top: 10px;
+            }
+            
+            /* AI-Powered Recommendation Styles */
+            .ai-recommendation {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border-radius: 12px;
+                padding: 20px;
+                margin-bottom: 20px;
+                box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+            }
+            
+            .ai-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 15px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+                padding-bottom: 10px;
+            }
+            
+            .ai-header h5 {
+                margin: 0;
+                font-size: 18px;
+                font-weight: 600;
+            }
+            
+            .ai-badge {
+                background: rgba(255, 255, 255, 0.2);
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 500;
+                backdrop-filter: blur(10px);
+            }
+            
+            .ai-recommendation .solution-header strong {
+                color: #fff;
+                font-size: 16px;
+            }
+            
+            .ai-recommendation .detail-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 8px;
+                padding: 5px 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            
+            .ai-recommendation .detail-row:last-child {
+                border-bottom: none;
+            }
+            
+            .ai-reasoning {
+                margin-top: 15px;
+                padding: 15px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                backdrop-filter: blur(10px);
+            }
+            
+            .ai-reasoning h6 {
+                margin: 0 0 10px 0;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            
+            .ai-reasoning p {
+                margin: 0;
+                line-height: 1.4;
+                font-size: 13px;
+            }
+            
+            .math-validation {
+                margin-top: 10px;
+                padding: 10px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 6px;
+                border-left: 3px solid #28a745;
+            }
+            
+            .math-validation h6 {
+                margin: 0 0 5px 0;
+                font-size: 12px;
+                font-weight: 600;
+                color: #90ee90;
+            }
+            
+            .math-validation p {
+                margin: 0;
+                font-size: 11px;
+                opacity: 0.9;
+                line-height: 1.3;
+            }
+            
+            .fallback-recommendation {
+                background: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 15px;
                 margin-bottom: 20px;
             }
             
-            .critical-issue {
-                background: #f8d7da;
-                border: 1px solid #f5c6cb;
-                padding: 10px;
-                margin-bottom: 8px;
-                border-radius: 4px;
+            .revenue-breakdown {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
                 font-size: 13px;
+            }
+            
+            .revenue-potential.high {
+                color: #28a745;
+                font-weight: bold;
+            }
+            
+            .revenue-potential.medium {
+                color: #ffc107;
+                font-weight: bold;
+            }
+            
+            .revenue-potential.low {
+                color: #dc3545;
+                font-weight: bold;
             }
             
             .enhanced-estimates-banner {
@@ -538,6 +690,17 @@ class ZoneAnalyzer {
         const truckRequirements = feasibility.truck_requirements || {};
         const recommended = truckRequirements.recommended_solution || {};
         
+        // Debug logging
+        console.log('[ZoneAnalyzer] Truck requirements:', {
+            ai_powered: truckRequirements.ai_powered,
+            recommended_fleet: truckRequirements.recommended_fleet,
+            gemini_reasoning: truckRequirements.gemini_reasoning ? 'Present' : 'Missing',
+            weekly_operational_cost: truckRequirements.weekly_operational_cost,
+            monthly_cost: truckRequirements.monthly_cost,
+            mathematical_validation: truckRequirements.mathematical_validation ? 'Present' : 'Missing'
+        });
+        console.log('[ZoneAnalyzer] Full truck requirements object:', truckRequirements);
+        
         // Check for enhanced estimates mode or offline mode
         let statusBanner = '';
         if (analysis.enhanced_estimates_mode) {
@@ -650,77 +813,103 @@ class ZoneAnalyzer {
                     </div>
                     
                     <div class="truck-summary">
-                        <div class="recommended-solution">
-                            <div class="solution-header">
-                                <strong>💡 Recommended: ${recommended.trucks_needed || 1} × ${recommended.truck_type?.replace('_', '-')?.toUpperCase() || 'TRUCK'}(S)</strong>
-                            </div>
-                            <div class="solution-details">
-                                <div class="detail-row">
-                                    <span>Collections per week:</span>
-                                    <strong>${recommended.collections_per_week || 2} times</strong>
+                        <!-- Debug info: AI powered = ${truckRequirements.ai_powered} -->
+                        <!-- Debug data: ${JSON.stringify({
+                            ai_powered: truckRequirements.ai_powered,
+                            weekly_operational_cost: truckRequirements.weekly_operational_cost,
+                            monthly_cost: truckRequirements.monthly_cost,
+                            recommended_fleet: truckRequirements.recommended_fleet
+                        }, null, 2)} -->
+                        ${truckRequirements.ai_powered ? `
+                            <div class="ai-recommendation">
+                                <div class="ai-header">
+                                    <h5>🤖 AI-Powered Recommendation</h5>
+                                    <span class="ai-badge">Gemini Flash</span>
                                 </div>
-                                <div class="detail-row">
-                                    <span>Daily total cost:</span>
-                                    <strong>K${((recommended.daily_cost || 0) * 27).toFixed(0)}</strong>
+                                <div class="solution-header">
+                                    <strong>💡 Recommended: ${truckRequirements.recommended_fleet || 'Calculating...'}</strong>
                                 </div>
-                                <div class="detail-row">
-                                    <span>Monthly total cost:</span>
-                                    <strong>K${((recommended.monthly_cost || 0) * 27).toFixed(0)}</strong>
-                                </div>
-                            </div>
-                            ${recommended.justification ? `
-                                <div class="justification">
-                                    <em>${recommended.justification}</em>
-                                </div>
-                            ` : ''}
-                        </div>
-                        
-                        <div class="truck-comparison">
-                            <div class="truck-option">
-                                <h5>10-Tonne Option</h5>
-                                <div class="truck-details">
-                                    <div><strong>${truckRequirements.truck_10_tonne?.trucks_needed || 1} trucks needed</strong></div>
-                                    <div>${truckRequirements.truck_10_tonne?.collections_per_week || 2} collections/week</div>
-                                    <div class="cost-breakdown">
-                                        <div>Operations: K${((truckRequirements.truck_10_tonne?.cost_breakdown?.daily_operational || 0) * 27).toFixed(0)}/day</div>
-                                        <div>Fuel: K${((truckRequirements.truck_10_tonne?.cost_breakdown?.daily_fuel || 0) * 27).toFixed(0)}/day</div>
-                                        <div>Franchise: K${((truckRequirements.truck_10_tonne?.cost_breakdown?.daily_franchise_fees || 0) * 27).toFixed(0)}/day</div>
-                                        <div><strong>Total: K${((truckRequirements.truck_10_tonne?.cost_breakdown?.daily_total || 0) * 27).toFixed(0)}/day</strong></div>
+                                <div class="solution-details">
+                                    <div class="detail-row">
+                                        <span>Collections per week:</span>
+                                        <strong>${truckRequirements.vehicle_requirements?.frequency_per_week || truckRequirements.frequency_per_week || 2} times</strong>
                                     </div>
-                                    <div><strong>Monthly: K${((truckRequirements.truck_10_tonne?.monthly_cost || 0) * 27).toFixed(0)}</strong></div>
-                                    <div>Efficiency: ${truckRequirements.truck_10_tonne?.efficiency_score || 0}%</div>
-                                </div>
-                            </div>
-                            <div class="truck-option">
-                                <h5>20-Tonne Option</h5>
-                                <div class="truck-details">
-                                    <div><strong>${truckRequirements.truck_20_tonne?.trucks_needed || 1} trucks needed</strong></div>
-                                    <div>${truckRequirements.truck_20_tonne?.collections_per_week || 2} collections/week</div>
-                                    <div class="cost-breakdown">
-                                        <div>Operations: K${((truckRequirements.truck_20_tonne?.cost_breakdown?.daily_operational || 0) * 27).toFixed(0)}/day</div>
-                                        <div>Fuel: K${((truckRequirements.truck_20_tonne?.cost_breakdown?.daily_fuel || 0) * 27).toFixed(0)}/day</div>
-                                        <div>Franchise: K${((truckRequirements.truck_20_tonne?.cost_breakdown?.daily_franchise_fees || 0) * 27).toFixed(0)}/day</div>
-                                        <div><strong>Total: K${((truckRequirements.truck_20_tonne?.cost_breakdown?.daily_total || 0) * 27).toFixed(0)}/day</strong></div>
+                                    <div class="detail-row">
+                                        <span>Total capacity provided:</span>
+                                        <strong>${(truckRequirements.total_capacity_provided / 1000).toFixed(1)} tonnes/week</strong>
                                     </div>
-                                    <div><strong>Monthly: K${((truckRequirements.truck_20_tonne?.monthly_cost || 0) * 27).toFixed(0)}</strong></div>
-                                    <div>Efficiency: ${truckRequirements.truck_20_tonne?.efficiency_score || 0}%</div>
+                                    <div class="detail-row">
+                                        <span>Collection coverage:</span>
+                                        <strong>${truckRequirements.collection_coverage || '100%'}</strong>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span>Weekly operational cost:</span>
+                                        <strong>K${(truckRequirements.weekly_operational_cost || 0).toLocaleString()}</strong>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span>Monthly total cost:</span>
+                                        <strong>K${(truckRequirements.monthly_cost || 0).toLocaleString()}</strong>
+                                    </div>
+                                </div>
+                                ${truckRequirements.gemini_reasoning ? `
+                                    <div class="ai-reasoning">
+                                        <h6>🧠 AI Analysis:</h6>
+                                        <p><em>${truckRequirements.gemini_reasoning}</em></p>
+                                    </div>
+                                ` : ''}
+                                ${truckRequirements.mathematical_validation ? `
+                                    <div class="math-validation">
+                                        <h6>🧮 Mathematical Validation:</h6>
+                                        <p><small>${truckRequirements.mathematical_validation}</small></p>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : `
+                            <div class="fallback-recommendation">
+                                <div class="solution-header">
+                                    <strong>💡 Recommended: ${recommended.trucks_needed || 1} × ${recommended.truck_type?.replace('_', '-')?.toUpperCase() || 'TRUCK'}(S)</strong>
+                                </div>
+                                <div class="solution-details">
+                                    <div class="detail-row">
+                                        <span>Collections per week:</span>
+                                        <strong>${recommended.collections_per_week || 2} times</strong>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span>Weekly operational cost:</span>
+                                        <strong>K${(recommended.weekly_operational_cost || 0).toLocaleString()}</strong>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span>Monthly total cost:</span>
+                                        <strong>K${(recommended.monthly_cost || 0).toLocaleString()}</strong>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        `}
                     </div>
                 </div>
             ` : ''}
             
-            ${result.critical_issues && result.critical_issues.length > 0 ? `
-                <div class="critical-issues">
-                    <h4>⚠️ Critical Issues</h4>
-                    ${result.critical_issues.map(issue => `
-                        <div class="critical-issue">
-                            <strong>${issue.issue}</strong><br>
-                            ${issue.description}<br>
-                            <em>Action: ${issue.action_required}</em>
+            ${result.revenue_projections && result.revenue_projections.success ? `
+                <div class="revenue-projections">
+                    <h4>💰 Revenue Projections</h4>
+                    <div class="revenue-overview">
+                        <div class="revenue-metric">
+                            <div class="revenue-value">K${result.revenue_projections.realistic_monthly_revenue_kwacha.toLocaleString()}</div>
+                            <div class="revenue-label">Monthly Revenue (${result.revenue_projections.collection_efficiency_percent.toFixed(0)}% collection rate)</div>
                         </div>
-                    `).join('')}
+                        <div class="revenue-metric">
+                            <div class="revenue-value">K${result.revenue_projections.realistic_annual_revenue_kwacha.toLocaleString()}</div>
+                            <div class="revenue-label">Annual Revenue</div>
+                        </div>
+                    </div>
+                    <div class="revenue-details">
+                        <div class="revenue-breakdown">
+                            <div><strong>Settlement Type:</strong> ${result.revenue_projections.settlement_description}</div>
+                            <div><strong>Total Buildings:</strong> ${result.revenue_projections.total_buildings}</div>
+                            <div><strong>Rate per Building:</strong> K${result.revenue_projections.rate_per_building_kwacha}/month</div>
+                            <div><strong>Revenue Potential:</strong> <span class="revenue-potential ${result.revenue_projections.revenue_potential}">${result.revenue_projections.revenue_potential.toUpperCase()}</span></div>
+                        </div>
+                    </div>
                 </div>
             ` : ''}
             
@@ -982,9 +1171,9 @@ class ZoneAnalyzer {
         const content = document.getElementById('recommendations-content');
         
         const recommendations = analysisResult.recommendations || [];
-        const criticalIssues = analysisResult.critical_issues || [];
+        const revenueProjections = analysisResult.revenue_projections || {};
         
-        if (recommendations.length === 0 && criticalIssues.length === 0) {
+        if (recommendations.length === 0 && !revenueProjections.success) {
             panel.style.display = 'none';
             return;
         }
@@ -993,11 +1182,20 @@ class ZoneAnalyzer {
         
         let html = '';
         
-        if (criticalIssues.length > 0) {
-            html += '<div class="mb-3"><h6 class="text-danger mb-2"><i class="fas fa-exclamation-triangle"></i> Critical Issues</h6>';
-            criticalIssues.forEach(issue => {
-                html += `<div class="alert alert-danger py-2 px-3 mb-1"><small>${issue}</small></div>`;
-            });
+        if (revenueProjections.success) {
+            html += '<div class="mb-3"><h6 class="text-success mb-2"><i class="fas fa-dollar-sign"></i> Revenue Projections</h6>';
+            html += `<div class="alert alert-success py-2 px-3 mb-1">
+                <small>
+                    <strong>Monthly Revenue:</strong> K${revenueProjections.realistic_monthly_revenue_kwacha?.toLocaleString() || 0} 
+                    (${revenueProjections.total_buildings || 0} buildings × K${revenueProjections.rate_per_building_kwacha || 0})
+                </small>
+            </div>`;
+            html += `<div class="alert alert-info py-2 px-3 mb-1">
+                <small>
+                    <strong>Settlement:</strong> ${revenueProjections.settlement_description || 'Unknown'} - 
+                    <strong>Potential:</strong> ${(revenueProjections.revenue_potential || 'unknown').toUpperCase()}
+                </small>
+            </div>`;
             html += '</div>';
         }
         
