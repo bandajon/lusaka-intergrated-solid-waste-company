@@ -1,4 +1,4 @@
-# LISWMC Analytics Dashboard Deployment Guide
+claude# LISWMC Analytics Dashboard Deployment Guide
 
 ## 🚀 Deploy to Render.com (Recommended - FREE)
 

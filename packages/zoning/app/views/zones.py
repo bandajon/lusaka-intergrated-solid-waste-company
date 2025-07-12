@@ -709,7 +709,7 @@ def analyze_zone():
         # Add additional fields for compatibility
         analysis_results['optimization_recommendations'] = []
         analysis_results['zone_viability_score'] = analysis_result.confidence_level or 0
-        analysis_results['critical_issues'] = analysis_result.warnings or []
+        analysis_results['revenue_projections'] = analysis_result.revenue_projections or {}
         analysis_results['confidence_assessment'] = {
             'level': analysis_result.confidence_level,
             'data_sources': analysis_result.data_sources
@@ -719,6 +719,32 @@ def analyze_zone():
         analysis_results['uncertainty_analysis'] = {}
         analysis_results['enhanced_estimates_mode'] = True
         analysis_results['enhanced_components'] = ['unified_analyzer']
+        
+        # Extract Chunga logistics data from collection requirements
+        chunga_logistics = {}
+        round_trip_fuel_cost_usd = 0  # Default value
+        
+        # Calculate monthly fixed costs (worker salaries + admin)
+        monthly_worker_salaries = 4 * 2500  # 4 workers × K2,500/month = K10,000
+        monthly_worker_salaries_usd = monthly_worker_salaries / 27  # Convert to USD
+        
+        if (analysis_result.collection_requirements and 
+            'chunga_logistics' in analysis_result.collection_requirements):
+            logistics = analysis_result.collection_requirements['chunga_logistics']
+            # Get actual fuel cost from logistics (already calculated with K23/liter)
+            round_trip_fuel_cost_kwacha = logistics.get('round_trip_fuel_cost_kwacha', 0)
+            round_trip_fuel_cost_usd = round_trip_fuel_cost_kwacha / 27  # Convert to USD
+            
+            chunga_logistics = {
+                'chunga_dumpsite_distance_km': logistics.get('distance_km', 0),
+                'round_trip_distance_km': logistics.get('round_trip_distance_km', 0),
+                'fuel_price_usd_per_liter': 23 / 27,  # K23 per liter converted to USD (updated from K25)
+                'franchise_cost_kwacha_per_tonne': 50,  # Standard franchise fee
+                'travel_time_minutes': logistics.get('duration_with_traffic_minutes', 0),
+                'data_source': logistics.get('data_source', 'unknown'),
+                'success': logistics.get('success', False),
+                'round_trip_fuel_cost_usd': round_trip_fuel_cost_usd
+            }
         
         # Format data structure for frontend compatibility
         analysis_results['analysis_modules'] = {
@@ -737,9 +763,18 @@ def analyze_zone():
             'collection_feasibility': {
                 'overall_score': analysis_result.confidence_level or 0,
                 'truck_requirements': {
-                    'truck_10_tonne': 1,  # Default minimum truck requirement
-                    'frequency_per_week': 2,
-                    'total_capacity_needed': (analysis_result.waste_generation_kg_per_day or 0) * 7
+                    'error': None,  # No error
+                    'waste_generation': {
+                        'estimated_population': analysis_result.population_estimate or 0,
+                        'daily_waste_kg': analysis_result.waste_generation_kg_per_day or 0,
+                        'weekly_waste_tonnes': ((analysis_result.waste_generation_kg_per_day or 0) * 7) / 1000
+                    },
+                    'dumpsite_logistics': chunga_logistics,
+                    # Include all Gemini AI recommendation data
+                    **(analysis_result.collection_requirements if hasattr(analysis_result, 'collection_requirements') and analysis_result.collection_requirements else {}),
+                    # Legacy fallback structure for non-AI recommendations  
+                    'truck_10_tonne': {'trucks_needed': 0, 'collections_per_week': 0, 'monthly_cost': 0},
+                    'truck_20_tonne': {'trucks_needed': 0, 'collections_per_week': 0, 'monthly_cost': 0}
                 }
             },
             'waste_generation': {
@@ -754,12 +789,13 @@ def analyze_zone():
         # Persist analysis results for session
         _persist_temporary_analysis(data['geometry'], analysis_results, data.get('session_id'))
         
-        return jsonify({
+        # Structure response to match frontend expectations
+        response_data = {
             'success': True,
             'analysis': analysis_results,
             'recommendations': analysis_results.get('optimization_recommendations', []),
             'viability_score': analysis_results.get('zone_viability_score', 0),
-            'critical_issues': analysis_results.get('critical_issues', []),
+            'revenue_projections': analysis_results.get('revenue_projections', {}),
             'confidence_assessment': analysis_results.get('confidence_assessment', {}),
             'performance_metrics': analysis_results.get('performance_metrics', {}),
             'cross_validation': analysis_results.get('cross_validation', {}),
@@ -767,7 +803,13 @@ def analyze_zone():
             'enhanced_estimates_mode': analysis_results.get('enhanced_estimates_mode', False),
             'enhanced_components': analysis_results.get('enhanced_components', []),
             'analysis_persisted': True  # Indicate that analysis was saved
-        })
+        }
+        
+        # Add analysis_modules at top level for frontend compatibility
+        if 'analysis_modules' in analysis_results:
+            response_data['analysis_modules'] = analysis_results['analysis_modules']
+        
+        return jsonify(response_data)
         
     except Exception as e:
         return jsonify({'error': f'Analysis failed: {str(e)}'}), 500

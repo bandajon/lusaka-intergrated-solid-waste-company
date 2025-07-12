@@ -2,307 +2,280 @@
 
 {% block title %}Dashboard - LISWMC Analytics Portal{% endblock %}
 
-{% block content %}
-<div class="max-w-7xl mx-auto px-4 py-8">
-    <!-- Welcome Header -->
-    <div class="mb-8">
-        <div class="bg-white rounded-lg shadow-sm p-6 border-l-4 border-indigo-500">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h1 class="text-2xl font-bold text-gray-900">
-                        Welcome, {{ user.full_name or user.username }}!
-                    </h1>
-                    <p class="text-gray-600 mt-1">
-                        Access all LISWMC analytics applications from your unified portal
-                    </p>
-                </div>
-                <div class="hidden md:block">
-                    <div class="flex items-center space-x-4 text-sm text-gray-500">
-                        <span><i class="fas fa-clock mr-1"></i>Login: {{ user.login_time[:19] if user.login_time else 'Unknown' }}</span>
-                        <span><i class="fas fa-user-tag mr-1"></i>Role: {{ user.role.title() }}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Quick Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div class="bg-white rounded-lg shadow-sm p-6">
-            <div class="flex items-center">
-                <div class="p-3 rounded-full bg-green-100 text-green-600">
-                    <i class="fas fa-server text-lg"></i>
-                </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">System Status</p>
-                    <p class="text-lg font-semibold text-gray-900">Online</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="bg-white rounded-lg shadow-sm p-6">
-            <div class="flex items-center">
-                <div class="p-3 rounded-full bg-blue-100 text-blue-600">
-                    <i class="fas fa-database text-lg"></i>
-                </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">Database</p>
-                    <p class="text-lg font-semibold text-gray-900">Connected</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="bg-white rounded-lg shadow-sm p-6">
-            <div class="flex items-center">
-                <div class="p-3 rounded-full bg-purple-100 text-purple-600">
-                    <i class="fas fa-apps text-lg"></i>
-                </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">Applications</p>
-                    <p class="text-lg font-semibold text-gray-900">{{ applications|length }}</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="bg-white rounded-lg shadow-sm p-6">
-            <div class="flex items-center">
-                <div class="p-3 rounded-full bg-yellow-100 text-yellow-600">
-                    <i class="fas fa-clock text-lg"></i>
-                </div>
-                <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">Last Login</p>
-                    <p class="text-lg font-semibold text-gray-900">{{ user.login_time[11:16] if user.login_time else 'N/A' }}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Applications Grid -->
-    <div class="mb-8">
-        <h2 class="text-xl font-semibold text-gray-900 mb-6">Available Applications</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {% for app in applications %}
-            {% if app.status != 'admin_only' or user.role == 'admin' %}
-            <div class="app-card bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                <div class="p-6">
-                    <!-- App Header -->
-                    <div class="flex items-center justify-between mb-4">
-                        <div class="flex items-center">
-                            <span class="text-3xl mr-3">{{ app.icon }}</span>
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-900">{{ app.name }}</h3>
-                                {% if app.status == 'admin_only' %}
-                                <span class="inline-block px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">Admin Only</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div class="flex items-center">
-                            <div class="w-3 h-3 bg-green-400 rounded-full"></div>
-                        </div>
-                    </div>
-                    
-                    <!-- App Description -->
-                    <p class="text-gray-600 text-sm mb-4">{{ app.description }}</p>
-                    
-                    <!-- App Features -->
-                    <div class="mb-6">
-                        <h4 class="text-sm font-medium text-gray-700 mb-2">Features:</h4>
-                        <ul class="text-xs text-gray-600 space-y-1">
-                            {% for feature in app.features %}
-                            <li class="flex items-center">
-                                <i class="fas fa-check text-green-500 mr-2 text-xs"></i>
-                                {{ feature }}
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                    
-                    <!-- Launch Button -->
-                    <div class="pt-4 border-t border-gray-100">
-                        {% if app.url.startswith('http') %}
-                        <button onclick="openAppInFrame('{{ app.url }}', '{{ app.name }}')" 
-                                class="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                            <i class="fas fa-window-restore mr-2"></i>
-                            Open {{ app.name }}
-                        </button>
-                        {% else %}
-                        <a href="{{ app.url }}" 
-                           class="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                            <i class="fas fa-arrow-right mr-2"></i>
-                            Access {{ app.name }}
-                        </a>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-            {% endfor %}
-        </div>
-    </div>
-
-    <!-- Service Information -->
-    <div class="bg-white rounded-lg shadow-sm p-6 border-l-4 border-blue-500">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4">
-            <i class="fas fa-info-circle mr-2 text-blue-500"></i>
-            Service Information
-        </h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-                <h4 class="font-medium text-gray-700 mb-2">Portal</h4>
-                <p class="text-gray-600">{{ config.get_portal_url() }}</p>
-                <p class="text-gray-500 text-xs">Main entry point</p>
-            </div>
-            <div>
-                <h4 class="font-medium text-gray-700 mb-2">Analytics Dashboard</h4>
-                <p class="text-gray-600">{{ config.get_dash_url() }}</p>
-                <p class="text-gray-500 text-xs">Real-time analytics</p>
-            </div>
-            <div>
-                <h4 class="font-medium text-gray-700 mb-2">Data Management</h4>
-                <p class="text-gray-600">{{ config.get_flask_url() }}</p>
-                <p class="text-gray-500 text-xs">Data processing tools</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Application Frame Container (Hidden by default) -->
-    <div id="appFrameContainer" class="fixed inset-0 bg-white z-50 hidden">
-        <!-- Frame Header -->
-        <div class="bg-indigo-600 text-white px-6 py-4 flex items-center justify-between shadow-lg">
-            <div class="flex items-center space-x-4">
-                <button onclick="closeAppFrame()" class="text-white hover:text-indigo-200 transition-colors">
-                    <i class="fas fa-arrow-left text-lg"></i>
-                </button>
-                <h1 id="appFrameTitle" class="text-lg font-semibold">Application</h1>
-            </div>
-            <div class="flex items-center space-x-4">
-                <button onclick="refreshAppFrame()" class="text-white hover:text-indigo-200 transition-colors" title="Refresh">
-                    <i class="fas fa-sync-alt"></i>
-                </button>
-                <button onclick="openInNewTab()" class="text-white hover:text-indigo-200 transition-colors" title="Open in New Tab">
-                    <i class="fas fa-external-link-alt"></i>
-                </button>
-                <button onclick="closeAppFrame()" class="text-white hover:text-indigo-200 transition-colors" title="Close">
-                    <i class="fas fa-times text-lg"></i>
-                </button>
-            </div>
-        </div>
-        
-        <!-- Frame Content -->
-        <div class="h-full" style="height: calc(100vh - 4rem);">
-            <iframe id="appFrame" src="" class="w-full h-full border-0" loading="lazy"></iframe>
-        </div>
-        
-        <!-- Loading Overlay -->
-        <div id="frameLoading" class="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center">
-            <div class="text-center">
-                <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
-                <p class="text-gray-600">Loading application...</p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-let currentAppUrl = '';
-
-// Open application in iframe
-function openAppInFrame(url, appName) {
-    currentAppUrl = url;
-    
-    // Add session token to URL for authentication sharing
-    const sessionToken = getCookie('session_token') || '{{ session.get("shared_session_token", "") }}';
-    if (sessionToken) {
-        const separator = url.includes('?') ? '&' : '?';
-        url = `${url}${separator}session_token=${sessionToken}`;
+{% block extra_css %}
+<style>
+    .applications-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 25px;
+        margin-top: 30px;
     }
     
-    // Show the frame container
-    document.getElementById('appFrameContainer').classList.remove('hidden');
-    
-    // Set the title
-    document.getElementById('appFrameTitle').textContent = appName;
-    
-    // Show loading overlay
-    document.getElementById('frameLoading').classList.remove('hidden');
-    
-    // Set iframe source
-    const iframe = document.getElementById('appFrame');
-    iframe.src = url;
-    
-    // Hide loading overlay when iframe loads
-    iframe.onload = function() {
-        setTimeout(() => {
-            document.getElementById('frameLoading').classList.add('hidden');
-        }, 500);
-    };
-    
-    console.log(`Opening application in frame: ${appName} - ${url}`);
-}
-
-// Helper function to get cookies
-function getCookie(name) {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(';').shift();
-    return null;
-}
-
-// Close application frame
-function closeAppFrame() {
-    document.getElementById('appFrameContainer').classList.add('hidden');
-    document.getElementById('appFrame').src = '';
-    currentAppUrl = '';
-}
-
-// Refresh application frame
-function refreshAppFrame() {
-    const iframe = document.getElementById('appFrame');
-    if (iframe.src) {
-        document.getElementById('frameLoading').classList.remove('hidden');
-        iframe.src = iframe.src;
+    .app-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        padding: 25px;
+        transition: all 0.3s ease;
+        border: 1px solid #e0e0e0;
+        position: relative;
+        overflow: hidden;
     }
-}
-
-// Open current app in new tab
-function openInNewTab() {
-    if (currentAppUrl) {
-        window.open(currentAppUrl, '_blank');
+    
+    .app-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+        border-color: #667eea;
     }
-}
-
-// Handle escape key to close frame
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        const frameContainer = document.getElementById('appFrameContainer');
-        if (!frameContainer.classList.contains('hidden')) {
-            closeAppFrame();
+    
+    .app-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #f0f0f0;
+    }
+    
+    .app-icon {
+        font-size: 36px;
+        margin-right: 15px;
+    }
+    
+    .app-title {
+        flex: 1;
+    }
+    
+    .app-title h3 {
+        margin: 0;
+        color: #1a1a1a;
+        font-size: 20px;
+    }
+    
+    .app-description {
+        color: #666;
+        margin-bottom: 20px;
+        line-height: 1.5;
+    }
+    
+    .app-features {
+        margin-bottom: 20px;
+    }
+    
+    .app-features h4 {
+        color: #333;
+        font-size: 14px;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .app-features ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .app-features li {
+        color: #555;
+        font-size: 14px;
+        padding: 5px 0;
+        padding-left: 20px;
+        position: relative;
+    }
+    
+    .app-features li::before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: #667eea;
+        font-weight: bold;
+    }
+    
+    .app-action {
+        display: block;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-align: center;
+        padding: 12px 20px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    
+    .app-action:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+    }
+    
+    .app-card.admin-only {
+        border-color: #ff9800;
+    }
+    
+    .app-card.admin-only .app-header {
+        border-bottom-color: #ffe0b2;
+    }
+    
+    .app-card.admin-only::before {
+        content: "Admin Only";
+        position: absolute;
+        top: 10px;
+        right: -30px;
+        background: #ff9800;
+        color: white;
+        padding: 5px 40px;
+        font-size: 12px;
+        transform: rotate(45deg);
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    }
+    
+    .welcome-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 30px;
+    }
+    
+    .welcome-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .welcome-text h2 {
+        margin: 0 0 10px 0;
+        font-size: 28px;
+    }
+    
+    .welcome-text p {
+        margin: 0;
+        opacity: 0.9;
+        font-size: 16px;
+    }
+    
+    .welcome-stats {
+        display: flex;
+        gap: 30px;
+    }
+    
+    .stat-item {
+        text-align: center;
+    }
+    
+    .stat-value {
+        font-size: 36px;
+        font-weight: bold;
+        display: block;
+    }
+    
+    .stat-label {
+        font-size: 14px;
+        opacity: 0.8;
+    }
+    
+    .role-badge {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.2);
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-size: 14px;
+        margin-left: 10px;
+    }
+    
+    .permissions-notice {
+        background: #f5f5f5;
+        border-left: 4px solid #ff9800;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 4px;
+    }
+    
+    .permissions-notice h4 {
+        margin: 0 0 10px 0;
+        color: #ff6f00;
+    }
+    
+    .permissions-notice p {
+        margin: 0;
+        color: #666;
+    }
+    
+    @media (max-width: 768px) {
+        .applications-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .welcome-content {
+            flex-direction: column;
+            text-align: center;
+        }
+        
+        .welcome-stats {
+            margin-top: 20px;
         }
     }
-});
+</style>
+{% endblock %}
 
-// Add click tracking for application launches
-document.querySelectorAll('.app-card a').forEach(link => {
-    link.addEventListener('click', function(e) {
-        const appName = this.closest('.app-card').querySelector('h3').textContent;
-        console.log(`Launching application: ${appName}`);
-        
-        // You can add analytics tracking here if needed
-        // gtag('event', 'app_launch', {'app_name': appName});
-    });
-});
-
-// Auto-refresh service status every 30 seconds
-setInterval(function() {
-    fetch('/api/status')
-        .then(response => response.json())
-        .then(data => {
-            console.log('Service status updated:', data);
-            // Update status indicators if needed
-        })
-        .catch(error => {
-            console.log('Status check failed:', error);
-        });
-}, 30000);
-</script>
+{% block content %}
+<div class="max-w-7xl mx-auto px-4">
+    <!-- Welcome Section -->
+    <div class="welcome-section">
+        <div class="welcome-content">
+            <div class="welcome-text">
+                <h2>Welcome, {{ user.full_name or user.username }}!
+                    <span class="role-badge">{{ user.role_display }}</span>
+                </h2>
+                <p>Access your analytics applications from one central location</p>
+            </div>
+            <div class="welcome-stats">
+                <div class="stat-item">
+                    <span class="stat-value">{{ permissions_summary.accessible_services }}</span>
+                    <span class="stat-label">Available Services</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">{{ permissions_summary.total_services }}</span>
+                    <span class="stat-label">Total Services</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    {% if permissions_summary.accessible_services < permissions_summary.total_services %}
+    <div class="permissions-notice">
+        <h4>Limited Access</h4>
+        <p>You have access to {{ permissions_summary.accessible_services }} out of {{ permissions_summary.total_services }} available services based on your {{ user.role_display }} role. Contact an administrator if you need additional access.</p>
+    </div>
+    {% endif %}
+    
+    <!-- Applications Grid -->
+    <div class="applications-grid">
+        {% for app in applications %}
+        <div class="app-card {% if app.id == 'user_management' %}admin-only{% endif %}">
+            <div class="app-header">
+                <div class="app-icon">{{ app.icon }}</div>
+                <div class="app-title">
+                    <h3>{{ app.name }}</h3>
+                </div>
+            </div>
+            
+            <p class="app-description">{{ app.description }}</p>
+            
+            <div class="app-features">
+                <h4>Key Features</h4>
+                <ul>
+                    {% for feature in app.features %}
+                    <li>{{ feature }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            
+            <a href="{{ app.url }}" class="app-action" target="_blank">
+                Open {{ app.name }}
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
 {% endblock %}

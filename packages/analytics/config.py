@@ -12,9 +12,10 @@ class AnalyticsConfig:
     """Configuration for analytics services"""
     
     # Port Configuration
-    PORTAL_PORT = int(os.environ.get('PORTAL_PORT', 5003))
+    PORTAL_PORT = int(os.environ.get('PORTAL_PORT', 5005))
     FLASK_PORT = int(os.environ.get('FLASK_PORT', 5002))
     DASH_PORT = int(os.environ.get('DASH_PORT', 5007))
+    QR_PORT = int(os.environ.get('QR_PORT', 5003))
     
     # Host Configuration
     PORTAL_HOST = os.environ.get('PORTAL_HOST', '0.0.0.0')

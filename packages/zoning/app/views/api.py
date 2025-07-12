@@ -203,6 +203,11 @@ def analyze_zone(zone_id):
     # Run analysis
     results = analyzer.analyze(analysis_request)
     
+    # Update zone with analysis results
+    zone.estimated_population = results.population_estimate or 0
+    zone.household_count = results.household_estimate or 0
+    zone.waste_generation_kg_day = results.waste_generation_kg_per_day or 0
+    
     # Store analysis results
     analysis = ZoneAnalysis(
         zone_id=zone.id,

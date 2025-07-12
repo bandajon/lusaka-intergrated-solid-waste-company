@@ -66,49 +66,9 @@ def start_flask_app():
         env = os.environ.copy()
         env['PYTHONPATH'] = str(get_project_root())
         
-        # Create the Flask app startup script content
-        flask_startup_code = '''
-import sys
-import os
-from pathlib import Path
-
-# Add project root to Python path
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-# Now import and create the Flask app
-from packages.analytics.flask_app import create_app
-from datetime import datetime
-
-app = create_app()
-
-# Create uploads directory if it doesn't exist
-uploads_dir = Path(__file__).resolve().parent / 'uploads'
-uploads_dir.mkdir(exist_ok=True)
-
-# Add jinja2 global variables
-@app.context_processor
-def inject_globals():
-    return dict(now=datetime.now())
-
-if __name__ == '__main__':
-    print("✅ Flask app starting...")
-    from config import AnalyticsConfig
-    app.run(debug=True, host=AnalyticsConfig.FLASK_HOST, port=AnalyticsConfig.FLASK_PORT)
-'''
-        
-        # Write the startup script
-        startup_script = Path(__file__).parent / 'flask_startup_temp.py'
-        startup_script.write_text(flask_startup_code)
-        
-        try:
-            # Run the Flask app
-            subprocess.run([sys.executable, str(startup_script)], 
-                         env=env, check=True, cwd=str(get_project_root()))
-        finally:
-            # Clean up temp file
-            if startup_script.exists():
-                startup_script.unlink()
+        # Run the main Flask app directly
+        subprocess.run([sys.executable, 'app.py'], 
+                     env=env, check=True, cwd=str(Path(__file__).parent))
                 
     except KeyboardInterrupt:
         print("\n👋 Flask app stopped by user")
@@ -126,6 +86,7 @@ def start_portal():
     print("   👥 User management")
     print("   📊 Application dashboard")
     print("   🔗 Quick links to all services")
+    print("   📱 Integrated QR code generation")
     print("")
     print(f"🌐 Portal available at: {AnalyticsConfig.get_portal_url()}")
     print("=" * 50)
@@ -171,31 +132,27 @@ def start_zoning():
 
 def start_both():
     """Start both dashboard and Flask app in separate processes"""
-    print("🚀 Starting LISWMC Complete Analytics Suite...")
+    print("🚀 Starting LISWMC Analytics Suite...")
     print("=" * 50)
-    AnalyticsConfig.print_urls()
+    print("🏢 Analytics Services:")
+    print(f"   📊 Analytics Dashboard: {AnalyticsConfig.get_dash_url()}")
+    print(f"   🔧 Data Management: {AnalyticsConfig.get_flask_url()}")
     print("=" * 50)
     
     try:
-        # Use the existing start_both.sh script if it exists
-        if Path('start_both.sh').exists():
-            subprocess.run(['./start_both.sh'], check=True)
-        else:
-            print("⚠️  start_both.sh script not found, starting services individually...")
-            print("   Starting dashboard and Flask app in background...")
-            
-            # Start dashboard in background
-            dashboard_process = subprocess.Popen([sys.executable, 'db_dashboard.py'])
-            print(f"   📊 Dashboard started (PID: {dashboard_process.pid})")
-            
-            # Wait a bit
-            import time
-            time.sleep(2)
-            
-            # Start Flask app in foreground
-            print("   🔧 Starting Flask app...")
-            subprocess.run([sys.executable, 'start_analytics.py', '--flask'])
-            sys.exit(1)
+        import time
+        
+        # Start dashboard in background
+        dashboard_process = subprocess.Popen([sys.executable, 'db_dashboard.py'])
+        print(f"   📊 Dashboard started (PID: {dashboard_process.pid})")
+        time.sleep(2)
+        
+        # Start Flask app in foreground
+        print("   🔧 Starting Flask app...")
+        env = os.environ.copy()
+        env['PYTHONPATH'] = str(get_project_root())
+        subprocess.run([sys.executable, 'app.py'], env=env, check=True)
+        
     except KeyboardInterrupt:
         print("\n👋 Analytics suite stopped by user")
     except subprocess.CalledProcessError as e:
@@ -203,85 +160,82 @@ def start_both():
         sys.exit(1)
 
 def start_all():
-    """Start all services: dashboard, Flask app, and zoning service"""
+    """Start all services: dashboard, Flask app, zoning service, and portal"""
     print("🚀 Starting LISWMC Complete Platform...")
     print("=" * 50)
     print("🏢 All Services:")
-    print("   📊 Analytics Dashboard (port 5007)")
-    print("   🔧 Data Management (port 5002)")
-    print("   🗺️  Zoning Service (port 5001)")
-    print("   🏠 Unified Portal (port 5000)")
+    print(f"   📊 Analytics Dashboard (port {AnalyticsConfig.DASH_PORT})")
+    print(f"   🔧 Data Management (port {AnalyticsConfig.FLASK_PORT})")
+    print(f"   🗺️  Zoning Service (port 5001)")
+    print(f"   🏠 Unified Portal (port {AnalyticsConfig.PORTAL_PORT})")
+    print("      └─ 📱 QR Code Service (integrated)")
     print("=" * 50)
     
     try:
         import time
         
         # Start all services in background
+        processes = []
+        
+        # Start dashboard
         dashboard_process = subprocess.Popen([sys.executable, 'db_dashboard.py'])
-        print(f"   📊 Dashboard started (PID: {dashboard_process.pid})")
+        processes.append(dashboard_process)
+        print(f"   ✅ Dashboard started (PID: {dashboard_process.pid})")
         time.sleep(1)
         
         # Start Flask app
         env = os.environ.copy()
         env['PYTHONPATH'] = str(get_project_root())
-        flask_startup_code = '''
-import sys
-import os
-from pathlib import Path
-
-# Add project root to Python path
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-# Now import and create the Flask app
-from packages.analytics.flask_app import create_app
-from datetime import datetime
-
-app = create_app()
-
-# Create uploads directory if it doesn't exist
-uploads_dir = Path(__file__).resolve().parent / 'uploads'
-uploads_dir.mkdir(exist_ok=True)
-
-# Add jinja2 global variables
-@app.context_processor
-def inject_globals():
-    return dict(now=datetime.now())
-
-if __name__ == '__main__':
-    from config import AnalyticsConfig
-    app.run(debug=True, host=AnalyticsConfig.FLASK_HOST, port=AnalyticsConfig.FLASK_PORT)
-'''
         
-        startup_script = Path(__file__).parent / 'flask_startup_temp.py'
-        startup_script.write_text(flask_startup_code)
-        
-        flask_process = subprocess.Popen([sys.executable, str(startup_script)], 
-                                       env=env, cwd=str(get_project_root()))
-        print(f"   🔧 Flask app started (PID: {flask_process.pid})")
+        flask_process = subprocess.Popen([sys.executable, 'app.py'], 
+                                       env=env, cwd=str(Path(__file__).parent))
+        processes.append(flask_process)
+        print(f"   ✅ Flask app started (PID: {flask_process.pid})")
         time.sleep(1)
         
         # Start zoning service
         zoning_dir = get_project_root() / 'packages' / 'zoning'
         zoning_process = subprocess.Popen([sys.executable, 'run.py'], 
                                         env=env, cwd=str(zoning_dir))
-        print(f"   🗺️  Zoning service started (PID: {zoning_process.pid})")
+        processes.append(zoning_process)
+        print(f"   ✅ Zoning service started (PID: {zoning_process.pid})")
         time.sleep(2)
         
         # Start portal in foreground
-        print("   🏠 Starting unified portal...")
+        print("   🏠 Starting unified portal (with integrated QR service)...")
+        print(f"\n🌟 Platform ready! All services started.")
+        print("💡 Access the platform through the Unified Portal:")
+        print(f"   🏠 Portal: {AnalyticsConfig.get_portal_url()}")
+        print()
+        
         subprocess.run([sys.executable, 'portal.py'])
+        
+        # If portal exits, clean up other processes
+        print("\n🧹 Cleaning up background processes...")
+        for process in processes:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            except Exception:
+                pass
         
     except KeyboardInterrupt:
         print("\n👋 All services stopped by user")
+        # Clean up background processes
+        print("🧹 Cleaning up background processes...")
+        for process in processes:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            except Exception:
+                pass
     except subprocess.CalledProcessError as e:
         print(f"\n❌ Error starting services: {e}")
         sys.exit(1)
-    finally:
-        # Clean up temp file
-        startup_script = Path(__file__).parent / 'flask_startup_temp.py'
-        if startup_script.exists():
-            startup_script.unlink()
 
 def run_tests():
     """Run the analytics test suite"""
@@ -332,6 +286,8 @@ Examples:
                        help='Start the Dash analytics dashboard')
     parser.add_argument('--flask', action='store_true',
                        help='Start the Flask data management application')
+    parser.add_argument('--qr', action='store_true',
+                       help='[DEPRECATED] QR service is now integrated into the portal')
     parser.add_argument('--zoning', action='store_true',
                        help='Start the zoning service')
     parser.add_argument('--both', action='store_true',
@@ -356,10 +312,15 @@ Examples:
         print("🏠 LISWMC Analytics Portal (Recommended):")
         print(f"   {AnalyticsConfig.get_portal_url()} - Unified access to all apps")
         print("")
-        AnalyticsConfig.print_urls()
-        print("   🗺️  Zoning Service: http://localhost:5001")
+        print("📋 Individual Services:")
+        print(f"   📊 Analytics Dashboard: {AnalyticsConfig.get_dash_url()}")
+        print(f"   🔧 Data Management: {AnalyticsConfig.get_flask_url()}")
+        print(f"   🗺️  Zoning Service: http://localhost:5001")
+        print(f"   📱 QR Code Service: Integrated in Portal")
         print("   🧪 Test Suite")
         print("=" * 50)
+        print("\n💡 Tip: Use 'python start_analytics.py --all' to start everything")
+        print("   or use 'python ../../../start_platform.py --all' from project root")
         return
     
     # Execute based on arguments
@@ -369,6 +330,9 @@ Examples:
         start_dash_dashboard()
     elif args.flask:
         start_flask_app()
+    elif args.qr:
+        print("⚠️  QR code service is now integrated into the portal.")
+        print("   Please use 'python start_analytics.py --portal' to access QR functionality.")
     elif args.zoning:
         start_zoning()
     elif args.both:

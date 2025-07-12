@@ -10,7 +10,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 
 # Import the location unifier module
 import location_unifier
-from database.database_connection import get_db_engine, TABLES
+from database_connection import get_db_engine, TABLES
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
