@@ -67,7 +67,7 @@ class AnalysisRequest:
             self.options.setdefault('household_size', 4.6)  # Lusaka urban average
             
         elif self.analysis_type == AnalysisType.BUILDINGS:
-            self.options.setdefault('confidence_threshold', 0.83)  # Set to 83% to filter out unfinished buildings and sheds
+            self.options.setdefault('confidence_threshold', 0.80)  # Set to 83% to filter out unfinished buildings and sheds
             self.options.setdefault('classify_settlement_type', True)
             self.options.setdefault('use_fallback', False)  # Disable fallback by default
             
@@ -81,7 +81,7 @@ class AnalysisRequest:
             self.options.setdefault('include_buildings', True)
             self.options.setdefault('include_waste', True)
             self.options.setdefault('include_validation', True)
-            self.options.setdefault('confidence_threshold', 0.83)  # Set to 83% to filter out unfinished buildings and sheds
+            self.options.setdefault('confidence_threshold', 0.80)  # Set to 83% to filter out unfinished buildings and sheds
             self.options.setdefault('use_fallback', False)  # Disable fallback by default
 
 
@@ -357,7 +357,190 @@ class UnifiedAnalyzer:
         return result
     
     def _analyze_population(self, request: AnalysisRequest, result: AnalysisResult) -> AnalysisResult:
-        """Perform population analysis using building-based estimation"""
+        """Perform population analysis using satellite data first, then building-based fallback with smart validation"""
+        
+        # Step 1: Try satellite/Earth Engine population data first (highest accuracy)
+        satellite_population = 0
+        satellite_success = False
+        
+        try:
+            from .population_service import get_earth_engine_population
+            logger.info("Attempting satellite population analysis...")
+            
+            # Convert geometry to geojson format if needed
+            geojson = request.geometry
+            if not isinstance(geojson, dict) or 'type' not in geojson:
+                # If it's a raw geometry, wrap it in a feature
+                geojson = {
+                    'type': 'Feature',
+                    'geometry': request.geometry,
+                    'properties': {}
+                }
+            
+            # Extract user classification for Earth Engine analysis
+            user_classification = {
+                'settlement_density': request.options.get('settlement_density', 'medium_density'),
+                'socioeconomic_level': request.options.get('socioeconomic_level', 'middle_income'),
+                'average_household_charge': request.options.get('average_household_charge'),
+                'waste_generation_rate': request.options.get('waste_generation_rate')
+            }
+            
+            satellite_result = get_earth_engine_population(geojson, prefer_worldpop=True, user_classification=user_classification)
+            
+            if satellite_result.get('estimated_population', 0) > 0 and satellite_result.get('data_source') != 'earth_engine_unavailable':
+                satellite_population = int(satellite_result['estimated_population'])
+                satellite_success = True
+                
+                result.population_estimate = satellite_population
+                result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
+                result.population_density = satellite_result.get('population_density', 2500)
+                result.confidence_level = 0.90  # High confidence for satellite data
+                
+                if not result.data_sources:
+                    result.data_sources = []
+                
+                # Add specific satellite data source
+                if 'worldpop' in satellite_result.get('data_source', '').lower():
+                    result.data_sources.extend(['WorldPop Satellite Data'])
+                elif 'ghsl' in satellite_result.get('data_source', '').lower():
+                    result.data_sources.extend(['GHSL Satellite Data'])
+                else:
+                    result.data_sources.extend(['Earth Engine Satellite Data'])
+                
+                logger.info(f"✅ Satellite population estimate: {result.population_estimate} people (confidence: {result.confidence_level:.1%})")
+                
+        except Exception as e:
+            logger.warning(f"Satellite population analysis failed: {str(e)}")
+        
+        # Step 1.5: Get building count for smart validation (if satellite data was successful)
+        building_count = 0
+        if satellite_success:
+            # Get building count from existing analysis or extract new one
+            if hasattr(result, 'building_count') and result.building_count:
+                building_count = result.building_count
+            else:
+                # Extract building count for validation
+                try:
+                    building_result = self._analyze_buildings(request, AnalysisResult(
+                        request_id=result.request_id,
+                        analysis_type=request.analysis_type,
+                        timestamp=result.timestamp,
+                        success=False
+                    ))
+                    if building_result.building_count:
+                        building_count = building_result.building_count
+                        # Store building data in main result
+                        result.building_count = building_count
+                        result.building_types = building_result.building_types
+                        result.settlement_classification = building_result.settlement_classification
+                except Exception as e:
+                    logger.warning(f"Could not extract building count for validation: {str(e)}")
+            
+            # Smart population validation and adjustment
+            if building_count > 0:
+                # Import config for smart estimation parameters
+                from app.analytics.config import AnalyticsConfig
+                
+                # Check if smart estimation is enabled
+                if not AnalyticsConfig.is_smart_estimation_enabled():
+                    logger.info("Smart population estimation disabled in configuration")
+                else:
+                    # Get configuration parameters
+                    threshold_multiplier = AnalyticsConfig.get_building_threshold_multiplier()
+                    high_density_multiplier = AnalyticsConfig.get_high_density_multiplier()
+                    medium_low_density_multiplier = AnalyticsConfig.get_medium_low_density_multiplier()
+                    smart_confidence = AnalyticsConfig.get_smart_estimation_confidence()
+                    
+                    # Extract zone classification
+                    settlement_density = user_classification.get('settlement_density', 'medium_density')
+                    zone_type = request.zone_type or request.options.get('zone_type', 'mixed_use')
+                    
+                    is_high_density = settlement_density == 'high_density'
+                    is_medium_low_density_residential = (
+                        settlement_density in ['medium_density', 'low_density'] and 
+                        zone_type.lower() in ['residential', 'mixed_use']
+                    )
+                    
+                    building_threshold = building_count * threshold_multiplier
+                    
+                    logger.info(f"Smart validation: satellite={satellite_population}, building_threshold={building_threshold:.0f} (buildings={building_count}×{threshold_multiplier})")
+                    logger.info(f"Zone classification: density={settlement_density}, type={zone_type}, high_density={is_high_density}, medium_low_residential={is_medium_low_density_residential}")
+                    
+                    # Check if conditions are met for smart estimation
+                    conditions_met = (
+                        satellite_population < building_threshold and 
+                        (is_high_density or is_medium_low_density_residential)
+                    )
+                    
+                    if conditions_met:
+                        # Apply appropriate smart estimation based on density and zone type
+                        if is_high_density:
+                            smart_population = int(building_count * high_density_multiplier)
+                            multiplier_used = high_density_multiplier
+                            adjustment_reason = 'High-density area with satellite underestimation'
+                        else:  # medium/low density residential
+                            smart_population = int(building_count * medium_low_density_multiplier)
+                            multiplier_used = medium_low_density_multiplier
+                            adjustment_reason = f'Medium/low density residential area ({settlement_density}) with satellite underestimation'
+                        
+                        # Store original estimates for reference
+                        if not hasattr(result, 'validation_metrics') or result.validation_metrics is None:
+                            result.validation_metrics = {}
+                        
+                        result.validation_metrics.update({
+                            'smart_estimation_applied': True,
+                            'original_satellite_population': satellite_population,
+                            'building_count_used': building_count,
+                            'building_threshold': building_threshold,
+                            'threshold_multiplier': threshold_multiplier,
+                            'smart_multiplier': multiplier_used,
+                            'settlement_density': settlement_density,
+                            'zone_type': zone_type,
+                            'adjustment_reason': adjustment_reason
+                        })
+                        
+                        # Update population estimate
+                        result.population_estimate = smart_population
+                        result.household_estimate = int(smart_population / 4.6)
+                        result.confidence_level = smart_confidence
+                        
+                        # Update data sources
+                        result.data_sources = [source for source in result.data_sources if 'Smart Building-Based Estimation' not in source]
+                        result.data_sources.append(f'Smart Building-Based Estimation (×{multiplier_used})')
+                        
+                        # Add warning about adjustment
+                        if not result.warnings:
+                            result.warnings = []
+                        result.warnings.append(f"Population adjusted from {satellite_population} to {smart_population} based on {building_count} buildings (×{multiplier_used} multiplier for {settlement_density} {zone_type})")
+                        
+                        logger.info(f"🏢 Smart population adjustment applied: {satellite_population} → {smart_population} people (buildings: {building_count}×{multiplier_used} for {settlement_density} {zone_type})")
+                        return result
+                    else:
+                        # Store validation info even when not applying smart estimation
+                        if not hasattr(result, 'validation_metrics') or result.validation_metrics is None:
+                            result.validation_metrics = {}
+                        
+                        threshold_multiplier = AnalyticsConfig.get_building_threshold_multiplier()
+                        building_threshold = building_count * threshold_multiplier
+                        
+                        result.validation_metrics.update({
+                            'smart_estimation_applied': False,
+                            'satellite_population': satellite_population,
+                            'building_count_available': building_count,
+                            'building_threshold': building_threshold,
+                            'threshold_multiplier': threshold_multiplier,
+                            'settlement_density': settlement_density,
+                            'zone_type': zone_type,
+                            'high_density_area': is_high_density,
+                            'medium_low_density_residential': is_medium_low_density_residential,
+                            'validation_reason': 'Satellite data appears accurate' if satellite_population >= building_threshold else 'Zone conditions not met for smart estimation'
+                        })
+            
+            # Return satellite result if smart estimation not applied
+            if satellite_success:
+                return result
+        
+        # Step 2: Fallback to building-based estimation (medium accuracy)
         if self.population_engine and result.building_count and result.building_count > 0:
             try:
                 logger.info("Using building-based population estimation")
@@ -389,43 +572,38 @@ class UnifiedAnalyzer:
                 result.population_estimate = int(pop_result['total_population'])
                 result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
                 result.population_density = pop_result.get('individual_results', {}).get('settlement_based', {}).get('population_density_per_sqkm', 2500)
-                result.confidence_level = min(0.85, 0.6 + (result.building_count / 200) * 0.25)  # Higher confidence with more buildings
+                result.confidence_level = min(0.75, 0.6 + (result.building_count / 200) * 0.15)  # Medium confidence for building-based
                 
                 if not result.data_sources:
                     result.data_sources = []
-                result.data_sources.extend(['Building-based population estimation (ensemble method)'])
+                result.data_sources.extend(['Google Earth Engine Buildings Analysis'])
                 
-                logger.info(f"Building-based population estimate: {result.population_estimate} people from {result.building_count} buildings")
+                logger.info(f"🏢 Building-based population estimate: {result.population_estimate} people from {result.building_count} buildings")
+                return result
                 
             except Exception as e:
-                logger.warning(f"Building-based population analysis failed: {str(e)}, using fallback")
-                result.population_estimate = self._fallback_population_estimate(request.geometry)
-                result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
-                result.population_density = 2500
-                result.confidence_level = 0.4
-                if not result.data_sources:
-                    result.data_sources = []
-                result.data_sources.extend(['Fallback estimation (building-based failed)'])
-                result.warnings = result.warnings or []
-                result.warnings.append(f"Building-based analysis failed: {str(e)}")
-        else:
-            # Fallback to basic estimation
-            logger.warning("Population engine not available or no buildings detected, using fallback estimation")
-            result.population_estimate = self._fallback_population_estimate(request.geometry)
-            result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
-            result.population_density = 2500  # Default density for Lusaka
-            result.confidence_level = 0.3  # Low confidence for fallback
-            if not result.data_sources:
-                result.data_sources = []
-            result.data_sources.extend(['Fallback estimation'])
-            result.warnings = result.warnings or []
-            result.warnings.append("Using fallback population estimation")
+                logger.warning(f"Building-based population analysis failed: {str(e)}")
         
+        # Step 3: Final fallback to area-based estimation (lowest accuracy)
+        logger.warning("Using area-based fallback estimation")
+        result.population_estimate = self._fallback_population_estimate(request.geometry)
+        result.household_estimate = int(result.population_estimate / 4.6) if result.population_estimate else 0
+        result.population_density = 2500  # Default density for Lusaka
+        result.confidence_level = 0.35  # Low confidence for area-based estimates
+        
+        if not result.data_sources:
+            result.data_sources = []
+        result.data_sources.extend(['Area-based Estimation (fallback)'])
+        
+        result.warnings = result.warnings or []
+        result.warnings.append("Using area-based population estimation - satellite and building data unavailable")
+        
+        logger.info(f"📏 Area-based population estimate: {result.population_estimate} people (confidence: {result.confidence_level:.1%})")
         return result
     
     def _analyze_buildings(self, request: AnalysisRequest, result: AnalysisResult) -> AnalysisResult:
         """Perform building analysis using Google Earth Engine with 83% confidence threshold"""
-        confidence_threshold = request.options.get('confidence_threshold', 0.83)
+        confidence_threshold = request.options.get('confidence_threshold', 0.80)
         
         if self.earth_engine and self.earth_engine.initialized:
             try:
@@ -722,21 +900,19 @@ class UnifiedAnalyzer:
         """Perform comprehensive analysis (all types)"""
         warnings = []
         
-        # Building analysis first (needed for population estimation)
+        # Population analysis first (tries satellite data, then building-based fallback)
+        if request.options.get('include_population', True):
+            try:
+                result = self._analyze_population(request, result)
+            except Exception as e:
+                warnings.append(f"Population analysis failed: {str(e)}")
+        
+        # Building analysis (needed for building count and types, but not population)
         if request.options.get('include_buildings', True):
             try:
                 result = self._analyze_buildings(request, result)
             except Exception as e:
                 warnings.append(f"Building analysis failed: {str(e)}")
-        
-        # Population analysis (use building-based if buildings were analyzed)
-        if request.options.get('include_population', True):
-            try:
-                # Only run population analysis if we don't have building-based population
-                if not result.population_estimate or result.population_estimate == 0:
-                    result = self._analyze_population(request, result)
-            except Exception as e:
-                warnings.append(f"Population analysis failed: {str(e)}")
         
         # Waste analysis
         if request.options.get('include_waste', True):

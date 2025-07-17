@@ -769,6 +769,7 @@ def analyze_zone():
                 'consensus': analysis_result.population_estimate or 0,
                 'household_count': analysis_result.household_estimate or 0,
                 'confidence': analysis_result.confidence_level or 0,
+                'data_sources': analysis_result.data_sources or [],
                 'method': 'unified_analyzer'
             },
             'collection_feasibility': {

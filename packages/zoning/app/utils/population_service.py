@@ -26,13 +26,14 @@ class PopulationService:
             self.earth_engine = None
             self.available = False
     
-    def get_population_estimate(self, zone_or_geojson, method_priority: str = "worldpop") -> Dict[str, Any]:
+    def get_population_estimate(self, zone_or_geojson, method_priority: str = "worldpop", user_classification: Dict = None) -> Dict[str, Any]:
         """
         Get population estimate for a zone using Earth Engine datasets
         
         Args:
             zone_or_geojson: Zone object or GeoJSON geometry
             method_priority: Preferred method ("worldpop", "ghsl", "gpw")
+            user_classification: User's area classification settings
             
         Returns:
             Dictionary with population estimate and metadata
@@ -47,8 +48,11 @@ class PopulationService:
             }
         
         try:
-            # Use Earth Engine analyzer
-            result = self.earth_engine.get_population_estimate(zone_or_geojson)
+            # Use Earth Engine analyzer with user classification if provided
+            if user_classification:
+                result = self.earth_engine.get_population_estimate_with_user_classification(zone_or_geojson, user_classification)
+            else:
+                result = self.earth_engine.get_population_estimate(zone_or_geojson)
             
             if result and not result.get('error'):
                 return {
@@ -125,20 +129,21 @@ def get_population_service() -> PopulationService:
     return _population_service
 
 
-def get_earth_engine_population(zone_or_geojson, prefer_worldpop: bool = True) -> Dict[str, Any]:
+def get_earth_engine_population(zone_or_geojson, prefer_worldpop: bool = True, user_classification: Dict = None) -> Dict[str, Any]:
     """
     Convenience function to get Earth Engine population data
     
     Args:
         zone_or_geojson: Zone object or GeoJSON geometry  
         prefer_worldpop: Whether to prefer WorldPop over other datasets
+        user_classification: User's area classification settings (settlement_density, socioeconomic_level, etc.)
         
     Returns:
         Population estimate with metadata
     """
     service = get_population_service()
     method = "worldpop" if prefer_worldpop else "ghsl"
-    return service.get_population_estimate(zone_or_geojson, method_priority=method)
+    return service.get_population_estimate(zone_or_geojson, method_priority=method, user_classification=user_classification)
 
 
 def get_minimal_population_fallback(area_sqm: float) -> Dict[str, Any]:

@@ -22,12 +22,33 @@ sys.path.insert(0, str(project_root))
 
 try:
     from flask_app import create_app
+    from flask import jsonify
     
     app = create_app()
     
     # Create uploads directory if it doesn't exist
     uploads_dir = parent_dir / 'uploads'
     uploads_dir.mkdir(exist_ok=True)
+    
+    # Add health check endpoint
+    @app.route('/health')
+    def health():
+        """Health check endpoint for Docker containers"""
+        try:
+            # Check basic application status
+            status = {
+                'status': 'healthy',
+                'service': 'data-management',
+                'version': '1.0.0',
+                'timestamp': datetime.now().isoformat()
+            }
+            return jsonify(status), 200
+        except Exception as e:
+            return jsonify({
+                'status': 'unhealthy',
+                'service': 'data-management',
+                'error': str(e)
+            }), 503
     
     # Add jinja2 global variables
     @app.context_processor

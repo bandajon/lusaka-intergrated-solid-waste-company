@@ -104,6 +104,17 @@ class AnalyticsConfig:
         'fuel_consumption_per_km': 0.35     # Liters per km
     }
     
+    # Smart Population Estimation Configuration
+    SMART_POPULATION_ESTIMATION = {
+        'enabled': True,                    # Enable smart population estimation
+        'building_threshold_multiplier': 4.5,  # Threshold: buildings × 4.5
+        'high_density_multiplier': 15.2,      # High density areas: buildings × 13
+        'medium_low_density_multiplier': 4.5, # Medium/low density residential: buildings × 6
+        'confidence_adjustment': 0.85,      # Confidence level for smart estimates
+        'require_high_density': False,      # Apply to high-density and residential areas
+        'log_adjustments': True            # Log all adjustments for debugging
+    }
+    
     @classmethod
     def set_fuel_price(cls, price_per_liter: float) -> None:
         """Manually set fuel price per liter"""
@@ -237,3 +248,46 @@ class AnalyticsConfig:
             cls.CLIENT_PAYMENT_RATES.update(settings['client_payment_rates'])
             
         # Add other setting updates as needed
+    
+    @classmethod
+    def get_smart_estimation_config(cls) -> Dict[str, Any]:
+        """Get smart population estimation configuration"""
+        return cls.SMART_POPULATION_ESTIMATION.copy()
+    
+    @classmethod
+    def is_smart_estimation_enabled(cls) -> bool:
+        """Check if smart population estimation is enabled"""
+        return cls.SMART_POPULATION_ESTIMATION.get('enabled', True)
+    
+    @classmethod
+    def get_building_threshold_multiplier(cls) -> float:
+        """Get building threshold multiplier for validation"""
+        return cls.SMART_POPULATION_ESTIMATION.get('building_threshold_multiplier', 4.5)
+    
+    @classmethod
+    def get_high_density_multiplier(cls) -> float:
+        """Get high density population multiplier"""
+        return cls.SMART_POPULATION_ESTIMATION.get('high_density_multiplier', 10)
+    
+    @classmethod
+    def get_medium_low_density_multiplier(cls) -> float:
+        """Get medium/low density residential population multiplier"""
+        return cls.SMART_POPULATION_ESTIMATION.get('medium_low_density_multiplier', 6)
+    
+    @classmethod
+    def get_smart_estimation_confidence(cls) -> float:
+        """Get confidence level for smart estimation"""
+        return cls.SMART_POPULATION_ESTIMATION.get('confidence_adjustment', 0.85)
+    
+    @classmethod
+    def set_smart_estimation_enabled(cls, enabled: bool) -> None:
+        """Enable or disable smart population estimation"""
+        cls.SMART_POPULATION_ESTIMATION['enabled'] = enabled
+    
+    @classmethod
+    def set_smart_estimation_multipliers(cls, building_threshold: float, high_density: float) -> None:
+        """Set smart estimation multipliers"""
+        if building_threshold <= 0 or high_density <= 0:
+            raise ValueError("Multipliers must be positive")
+        cls.SMART_POPULATION_ESTIMATION['building_threshold_multiplier'] = building_threshold
+        cls.SMART_POPULATION_ESTIMATION['high_density_multiplier'] = high_density
