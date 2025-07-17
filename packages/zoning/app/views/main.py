@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, current_app
+from flask import Blueprint, render_template, redirect, url_for, current_app, jsonify
 from flask_login import login_required, current_user
 from sqlalchemy import func
 from app import db
@@ -134,3 +134,27 @@ def settings():
         return redirect(url_for('main.index'))
     
     return render_template('main/settings.html')
+
+
+@main_bp.route('/health')
+def health():
+    """Health check endpoint for Docker containers"""
+    try:
+        # Check database connection
+        db.session.execute('SELECT 1')
+        
+        # Check basic application status
+        status = {
+            'status': 'healthy',
+            'service': 'zoning-service',
+            'version': '1.0.0',
+            'timestamp': current_app.config.get('CURRENT_TIME', 'unknown')
+        }
+        
+        return jsonify(status), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'service': 'zoning-service',
+            'error': str(e)
+        }), 503

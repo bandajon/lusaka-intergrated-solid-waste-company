@@ -1,0 +1,100 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+dashboard.log
+
+# Database
+*.db
+*.sqlite
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Uploads (keep structure but ignore content)
+uploads/*
+!uploads/.gitkeep
+
+# Static downloads
+static/downloads/*
+!static/downloads/.gitkeep
+
+# Flask app specific
+flask_app/uploads/*
+!flask_app/uploads/.gitkeep
+flask_app/static/downloads/*
+!flask_app/static/downloads/.gitkeep
+
+# Git
+.git/
+.gitignore
+README.md
+*.md
+
+# Flask
+instance/
+.webassets-cache
+
+# Testing
+.pytest_cache/
+htmlcov/
+
+# Portal specific
+portal_static/downloads/*
+!portal_static/downloads/.gitkeep
+
+# Analytics specific
+dashboard.log
+*.csv

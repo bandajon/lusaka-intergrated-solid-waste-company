@@ -474,6 +474,27 @@ def email_qr_code():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+
+@app.route('/health')
+def health():
+    """Health check endpoint for Docker containers"""
+    try:
+        # Check basic application status
+        status = {
+            'status': 'healthy',
+            'service': 'unified-portal',
+            'version': '1.0.0',
+            'timestamp': datetime.now().isoformat(),
+            'authenticated_users': len([k for k in session.keys() if 'user_id' in str(k)])
+        }
+        return jsonify(status), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'service': 'unified-portal',
+            'error': str(e)
+        }), 503
+
 @app.context_processor
 def inject_globals():
     """Inject global variables into templates"""

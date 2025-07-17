@@ -674,6 +674,9 @@ class ZoneAnalyzer {
     }
     
     displayAnalysisResults(result) {
+        // Store analysis result globally so other functions can access data sources and confidence
+        window.lastAnalysisResult = result;
+        
         const analysis = result.analysis;
         const content = document.getElementById('analysis-content');
         const actions = document.getElementById('analysis-actions');
@@ -1166,6 +1169,9 @@ ${result.revenue_projections && result.revenue_projections.success ? `
                     <div style="background: white; padding: 12px; border-radius: 6px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                         <div style="font-size: 20px; font-weight: bold; color: #2c3e50;">${(keyMetrics.estimated_population || 0).toLocaleString()}</div>
                         <div style="font-size: 12px; color: #7f8c8d; margin-top: 4px;">Population</div>
+                        <div style="font-size: 10px; color: #6c757d; margin-top: 2px;">
+                            ${this.getPopulationSourceInfo(dashboardData)}
+                        </div>
                     </div>
                     <div style="background: white; padding: 12px; border-radius: 6px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                         <div style="font-size: 20px; font-weight: bold; color: #2c3e50;">${(keyMetrics.daily_waste || keyMetrics.total_waste_kg_day || 0).toFixed(1)} kg</div>
@@ -1267,6 +1273,54 @@ ${result.revenue_projections && result.revenue_projections.success ? `
         }
         
         content.innerHTML = html;
+    }
+    
+    getPopulationSourceInfo(dashboardData) {
+        // Extract analysis data to determine population data source
+        try {
+            // Check multiple possible locations for analysis data
+            const analysis = window.lastAnalysisResult?.analysis || {};
+            const populationData = window.lastAnalysisResult?.analysis_modules?.population || {};
+            
+            // Get data sources from either location
+            const dataSources = analysis.data_sources || populationData.data_sources || [];
+            const confidence = analysis.confidence_level || populationData.confidence || 0;
+            
+            // Determine primary data source and create appropriate display with improved matching
+            if (dataSources.some(source => 
+                source.includes('WorldPop') || 
+                source.includes('GHSL') || 
+                source.includes('Satellite') ||
+                source.includes('Earth Engine Satellite')
+            )) {
+                return `<i class="fas fa-satellite"></i> Satellite Data (${Math.round(confidence * 100)}% confidence)`;
+            } else if (dataSources.some(source => 
+                source.includes('Google Earth Engine Buildings') || 
+                source.includes('Building') || 
+                source.includes('ensemble')
+            )) {
+                return `<i class="fas fa-building"></i> Building Analysis (${Math.round(confidence * 100)}% confidence)`;
+            } else if (dataSources.some(source => 
+                source.includes('Area-based') || 
+                source.includes('Fallback') || 
+                source.includes('fallback')
+            )) {
+                return `<i class="fas fa-calculator"></i> Estimated (${Math.round(confidence * 100)}% confidence)`;
+            } else if (dataSources.length > 0) {
+                // Generic analysis with first data source as hint
+                const primarySource = dataSources[0];
+                if (primarySource.includes('Enhanced')) {
+                    return `<i class="fas fa-chart-line"></i> Enhanced Analysis (${Math.round(confidence * 100)}% confidence)`;
+                }
+                return `<i class="fas fa-info-circle"></i> Analysis (${Math.round(confidence * 100)}% confidence)`;
+            } else {
+                // Fallback when no data source info is available
+                return `<i class="fas fa-chart-area"></i> Estimated`;
+            }
+        } catch (error) {
+            console.warn('[ZoneAnalyzer] Could not determine population source:', error);
+            return `<i class="fas fa-chart-area"></i> Estimated`;
+        }
     }
     
     getSessionId() {
