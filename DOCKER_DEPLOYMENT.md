@@ -891,3 +891,45 @@ SOME USEFUL INFOMATION
   - Data Management: http://129.80.196.187:5002
 
   Try the permission fix and let me know if you can connect successfully!
+
+
+
+    Step 1: Stop All Running Containers
+
+  # Stop all running containers
+  docker stop $(docker ps -aq)
+
+  Step 2: Remove All Containers
+
+  # Now remove all containers
+  docker rm $(docker ps -aq)
+
+  Alternative: Force Remove (if needed)
+
+  If stopping doesn't work, you can force remove:
+  # Force remove all containers (stops and removes in one command)
+  docker rm -f $(docker ps -aq)
+
+  Step 3: Clean Up Networks and Volumes
+
+  # Remove networks
+  docker network rm liswmc_liswmc_network || true
+  docker network rm liswmc_network || true
+
+  # Clean up volumes
+  docker volume prune -f
+  docker network prune -f
+
+  Step 4: Start Fresh
+
+  # Navigate to project directory
+  cd lusaka-intergrated-solid-waste-management-company
+
+  # Start production containers
+  docker-compose -f docker-compose.prod.yml up -d
+
+  # Check status
+  docker-compose -f docker-compose.prod.yml ps
+
+  # View logs
+  docker-compose -f docker-compose.prod.yml logs -f

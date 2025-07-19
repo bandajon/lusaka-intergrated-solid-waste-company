@@ -12,11 +12,20 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements from parent directory
-COPY requirements.txt .
+COPY ../requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy parent directory contents (analytics package)
+COPY .. /app/analytics
+
+# Copy current directory (flask_app)
+COPY . /app/flask_app
+
+# Set Python path to include parent directory
+ENV PYTHONPATH="/app:/app/analytics:/app/flask_app"
+
+# Set working directory to analytics for proper imports
+WORKDIR /app/analytics
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser && \
@@ -34,4 +43,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5002/health || exit 1
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:5002", "--workers", "1", "--timeout", "120", "run:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5002", "--workers", "1", "--timeout", "120", "flask_app.run:app"]
